@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sports Chatbot Client</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        #chatbox {
+            height: 400px;
+            border: 1px solid #ccc;
+            overflow-y: scroll;
+            margin-bottom: 15px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+        }
+        #ui-components {
+            border: 1px solid #e0e0e0;
+            padding: 15px;
+            margin-top: 20px;
+            min-height: 100px;
+            background-color: #ffffff;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .message { margin: 5px 0; padding: 8px 12px; border-radius: 15px; max-width: 80%; word-wrap: break-word; }
+        .user-message { background-color: #dcf8c6; margin-left: auto; border-bottom-right-radius: 0; }
+        .bot-message { background-color: #e8f0fe; margin-right: auto; border-bottom-left-radius: 0; }
+        .input-area { display: flex; margin-top: 10px; }
+        #userInput { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 5px 0 0 5px; }
+        #sendButton { padding: 10px 15px; border: none; background-color: #4CAF50; color: white; cursor: pointer; border-radius: 0 5px 5px 0; }
+        #sendButton:hover { background-color: #45a049; }
+        #loadingIndicator { display: none; text-align: center; padding: 10px; color: #555; }
+        /* Basic Table Styling */
+        table { border-collapse: collapse; width: 100%; margin-top: 15px; font-size: 0.9em; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; font-weight: bold; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        caption { caption-side: top; font-weight: bold; margin-bottom: 5px; font-size: 1.1em; text-align: left;}
+        h4, h5 { margin-top: 15px; margin-bottom: 5px; color: #333; }
+        ul { padding-left: 20px; }
+    </style>
+</head>
+<body>
+
+    <h1>Sports Chatbot</h1>
+
+    <div id="chatbox">
+        </div>
+
+    <div class="input-area">
+        <input type="text" id="userInput" placeholder="Ask about sports scores, H2H, schedules..." autocomplete="off"/>
+        <button id="sendButton" onclick="sendMessage()">Send</button>
+    </div>
+     <div id="loadingIndicator">Thinking...</div>
+
+    <hr style="margin: 30px 0;">
+
+    <h2>Dynamic UI Area</h2>
+    <div id="ui-components">
+        <p>Ask a question like "H2H Chelsea vs Arsenal", "Upcoming Premier League matches", or "La Liga standings" to see components render here.</p>
+    </div>
+
+    <script>
+        const chatbox = document.getElementById('chatbox');
+        const userInput = document.getElementById('userInput');
+        const uiComponentsDiv = document.getElementById('ui-components');
+        const sendButton = document.getElementById('sendButton');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+
+        // Generate a simple session ID for history tracking
+        const userId = 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+
+        // --- Event Listeners ---
+        sendButton.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // --- Core Functions ---
+        function appendMessage(text, sender = 'bot') {
+            const msgDiv = document.createElement('div');
+            msgDiv.textContent = text;
+            msgDiv.classList.add('message');
+            msgDiv.classList.add(sender === 'user' ? 'user-message' : 'bot-message');
+            chatbox.appendChild(msgDiv);
+            chatbox.scrollTop = chatbox.scrollHeight; // Auto-scroll
+        }
+
+        async function sendMessage() {
+            const query = userInput.value.trim();
+            if (!query) return;
+
+            appendMessage(query, 'user'); // Show user's message immediately
+            userInput.value = ''; // Clear input field
+            userInput.disabled = true; // Disable input during processing
+            sendButton.disabled = true;
+            loadingIndicator.style.display = 'block';
+            uiComponentsDiv.innerHTML = ''; // Clear previous UI component
+
+            // --- API Call ---
+            try {
+                // Make sure the backend URL is correct
+                const response = await fetch('http://127.0.0.1:8000/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json' // Explicitly accept JSON
+                    },
+                    body: JSON.stringify({
+                        user_id: userId,
+                        query: query
+                    })
+                });
+
+                // Check if response is OK (status 200-299)
+                if (!response.ok) {
+                     let errorDetail = `HTTP error! Status: ${response.status}`;
+                     try {
+                         // Try to parse potential JSON error from FastAPI
+                         const errorData = await response.json();
+                         errorDetail = errorData.detail || JSON.stringify(errorData);
+                     } catch (parseError) {
+                         // If response is not JSON, use status text
+                         errorDetail = response.statusText || errorDetail;
+                     }
+                    throw new Error(errorDetail);
+                }
+
+                // Parse the JSON response from the backend
+                const data = await response.json(); // Expects {reply: "...", ui_data: {...}}
+
+                // --- Process Successful Response ---
+                appendMessage(data.reply, 'bot'); // Display text reply
+                renderUiComponent(data.ui_data); // Render UI based on ui_data
+
+            } catch (error) {
+                console.error('Error sending/receiving message:', error);
+                appendMessage(`Error: ${error.message || 'Could not connect to the service.'}`, 'bot'); // Display error in chat
+                uiComponentsDiv.innerHTML = `<p style="color: red;">Failed to load UI component: ${error.message}</p>`; // Show error in UI area
+            } finally {
+                // Re-enable input regardless of success or failure
+                userInput.disabled = false;
+                sendButton.disabled = false;
+                loadingIndicator.style.display = 'none';
+                userInput.focus(); // Focus back on input
+            }
+        }
+
+        function renderUiComponent(uiData) {
+            // Clear previous UI component content
+            uiComponentsDiv.innerHTML = '';
+
+            if (!uiData || !uiData.component_type || typeof uiData.data === 'undefined') { // Check data exists
+                console.warn("Received invalid or empty ui_data structure.");
+                 uiComponentsDiv.innerHTML = '<p>No specific UI data to display for this response.</p>'; // Inform user
+                return;
+            }
+
+            console.log("Attempting to render UI Component:", uiData.component_type); // Debugging
+
+            // --- Call specific rendering functions based on type ---
+            try {
+                 switch (uiData.component_type) {
+                    case 'html_table':
+                    console.log(">>> Entered 'html_table' case. Full uiData:", JSON.stringify(uiData, null, 2)); // Log the whole object clearly
+
+                    // Check if the data object exists and is truthy
+                    if (uiData.data) {
+                        console.log(">>> uiData.data exists.");
+
+                        // Check if html_string exists within data AND is not empty
+                        if (uiData.data.html_string && uiData.data.html_string.trim() !== '') {
+                            // Log the first part of the HTML string to verify it looks okay
+                            console.log(">>> uiData.data.html_string exists and is not empty. Value starts with:", uiData.data.html_string.substring(0, 150) + "...");
+
+                            try {
+                                // Attempt to set the innerHTML
+                                uiComponentsDiv.innerHTML = uiData.data.html_string;
+                                console.log(">>> SUCCESS: innerHTML was set for the table."); // Log success
+                            } catch (e) {
+                                // Catch potential errors during the actual rendering by the browser
+                                console.error("!!! ERROR setting innerHTML:", e);
+                                uiComponentsDiv.innerHTML = '<p style="color: red;">Error trying to display table content.</p>';
+                            }
+                        } else {
+                            // html_string is missing or falsy (e.g., empty string)
+                            console.error("!!! uiData.data exists, BUT html_string is missing or empty. Value:", uiData.data.html_string);
+                            uiComponentsDiv.innerHTML = '<p>Received table format but HTML content appears empty.</p>';
+                        }
+                    } else {
+                        // data object itself is missing or falsy
+                        console.error("!!! uiData.data object is missing or falsy:", uiData);
+                        uiComponentsDiv.innerHTML = '<p>Received table component type but the data object itself is missing.</p>';
+                    }
+                    break; // Don't forget the break statement
+                    case 'h2h_comparison_table':
+                        uiComponentsDiv.innerHTML = generateH2HTableHTML(uiData.data);
+                        break;
+                    case 'match_schedule_by_league':
+                        uiComponentsDiv.innerHTML = generateScheduleTablesHTML(uiData.data);
+                        break;
+                    case 'standings_table':
+                        uiComponentsDiv.innerHTML = generateStandingsTableHTML(uiData.data);
+                        break;
+                    case 'team_stats': // Assuming a component type for team stats comparison
+                        uiComponentsDiv.innerHTML = generateTeamStatsTableHTML(uiData.data);
+                        break;
+                    case 'results_list': // Assuming a type for simple results
+                         uiComponentsDiv.innerHTML = generateResultsListHTML(uiData.data);
+                         break;
+                    // Add cases for other component types you define
+                    case 'generic_text':
+                    default:
+                        uiComponentsDiv.innerHTML = '<p>No specific UI data to display for this response.</p>';
+                        break;
+                }
+            } catch (renderError) {
+                console.error(`Error rendering component ${uiData.component_type}:`, renderError);
+                uiComponentsDiv.innerHTML = `<p style="color: red;">Error displaying UI component for ${uiData.component_type}.</p>`;
+            }
+        }
+
+        // --- HTML Generation Functions ---
+        // These functions take the specific 'data' part of ui_data and return HTML strings
+
+        function safeText(text) {
+             // Basic protection against HTML injection - use a proper sanitizer in production!
+             if (text === null || typeof text === 'undefined') return 'N/A';
+             const div = document.createElement('div');
+             div.textContent = String(text);
+             return div.innerHTML;
+        }
+
+        function generateH2HTableHTML(data) {
+             if (!data || !data.h2h_summary) return '<p>Head-to-head data is incomplete.</p>';
+
+            let html = '<h4>Head-to-Head Comparison</h4>';
+            const t1 = data.h2h_summary.team1 || {};
+            const t2 = data.h2h_summary.team2 || {};
+
+            html += `
+                <table>
+                    <thead><tr><th>Stat</th><th>${safeText(t1.name) || 'Team 1'}</th><th>${safeText(t2.name) || 'Team 2'}</th></tr></thead>
+                    <tbody>
+                        <tr><td>Wins</td><td>${safeText(t1.wins)}</td><td>${safeText(t2.wins)}</td></tr>
+                        <tr><td>Draws</td><td>${safeText(t1.draws)}</td><td>${safeText(t2.draws)}</td></tr>
+                        <tr><td>Losses</td><td>${safeText(t1.losses)}</td><td>${safeText(t2.losses)}</td></tr>
+                        <tr><td>Goals For</td><td>${safeText(t1.goals_for)}</td><td>${safeText(t2.goals_for)}</td></tr>
+                        <tr><td>Goals Against</td><td>${safeText(t1.goals_against)}</td><td>${safeText(t2.goals_against)}</td></tr>
+                    </tbody>
+                </table>
+                <p>Total Matches: ${safeText(data.h2h_summary.total_matches)}</p>
+            `; // Closing backtick was missing here originally, now added.
+
+            if (data.recent_meetings && data.recent_meetings.length > 0) {
+                html += '<h5>Recent Meetings</h5><ul>';
+                data.recent_meetings.forEach(m => {
+                    html += `<li>${safeText(m.date)}: ${safeText(m.competition)} - ${safeText(m.score)}</li>`;
+                });
+                html += '</ul>'; // Closing ul
+            }
+            return html;
+        }
+
+        function generateScheduleTablesHTML(data) {
+            if (!data || !data.leagues || Object.keys(data.leagues).length === 0) {
+                 return '<h4>Upcoming Matches</h4><p>No upcoming matches found based on your query.</p>';
+            }
+
+            let html = '<h4>Upcoming Matches by League</h4>';
+            for (const leagueName in data.leagues) {
+                 const matches = data.leagues[leagueName];
+                 if (matches.length > 0) {
+                     html += `<h5>${safeText(leagueName)}</h5>`;
+                     html += `
+                        <table>
+                            <thead><tr><th>Date</th><th>Time</th><th>Home Team</th><th>Away Team</th><th>Popular</th></tr></thead>
+                            <tbody>`; // Closing bracket was missing here originally, now added.
+                     matches.forEach(m => {
+                         html += `
+                            <tr>
+                                <td>${safeText(m.date)}</td>
+                                <td>${safeText(m.time)}</td>
+                                <td>${safeText(m.team_home?.name)}</td>
+                                <td>${safeText(m.team_away?.name)}</td>
+                                <td>${m.is_popular ? 'Yes' : 'No'}</td>
+                            </tr>`; // Closing bracket was missing here originally, now added.
+                     });
+                     html += `</tbody></table>`; // Closing table tags
+                 } else {
+                     html += `<h5>${safeText(leagueName)}</h5><p>No matches found for this league.</p>`;
+                 }
+            }
+            return html;
+        }
+
+         function generateStandingsTableHTML(data) {
+             if (!data || !data.standings || data.standings.length === 0) {
+                 return `<h4>${safeText(data.league_name) || 'League'} Standings</h4><p>Standings data not available.</p>`;
+             }
+             let html = `<h4>${safeText(data.league_name)} Standings</h4>`;
+             html += `
+                <table>
+                    <thead><tr><th>Rank</th><th>Team</th><th>Pl</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr></thead>
+                    <tbody>`; // Closing bracket was missing here originally, now added.
+             data.standings.forEach(t => {
+                 html += `
+                    <tr>
+                        <td>${safeText(t.rank)}</td>
+                        <td>${safeText(t.team_name)}</td>
+                        <td>${safeText(t.played)}</td>
+                        <td>${safeText(t.wins)}</td>
+                        <td>${safeText(t.draws)}</td>
+                        <td>${safeText(t.losses)}</td>
+                        <td>${safeText(t.goals_for)}</td>
+                        <td>${safeText(t.goals_against)}</td>
+                        <td>${safeText(t.goal_difference)}</td>
+                        <td><b>${safeText(t.points)}</b></td>
+                    </tr>`; // Closing bracket was missing here originally, now added.
+             });
+             html += `</tbody></table>`; // Closing table tags
+             return html;
+        }
+
+         function generateTeamStatsTableHTML(data) {
+             if (!data || !data.team_stats_comparison || data.team_stats_comparison.length === 0) {
+                 return '<h4>Team Statistics</h4><p>Statistics not available.</p>';
+             }
+            let html = `<h4>Team Statistics Comparison</h4>`;
+            // Simple example, adapt columns based on sport/available data
+            html += `<table><thead><tr><th>Team</th><th>Form (Last ${safeText(data.team_stats_comparison[0]?.last_n_matches ?? 'N')})</th><th>GF</th><th>GC</th><th>Avg Poss%</th></tr></thead><tbody>`; // Closing bracket was missing, check optional chaining
+            data.team_stats_comparison.forEach(t => {
+                 html += `
+                    <tr>
+                        <td>${safeText(t.team_name)}</td>
+                        <td>${safeText(t.form?.join(', '))}</td>
+                        <td>${safeText(t.goals_scored)}</td>
+                        <td>${safeText(t.goals_conceded)}</td>
+                        <td>${safeText(t.avg_possession)}</td>
+                    </tr>`; // Closing bracket was missing here originally, now added.
+            });
+            html += `</tbody></table>`; // Closing table tags
+            return html;
+        }
+
+         function generateResultsListHTML(data) {
+            if (!data || !data.matches || data.matches.length === 0) {
+                return `<h4>Match Results</h4><p>No recent results found.</p>`;
+            }
+             let html = '<h4>Match Results</h4><ul>'; // Closing bracket was missing here originally, now added.
+             data.matches.forEach(m => {
+                 html += `<li>${safeText(m.date)} ${safeText(m.time)} [${safeText(m.competition)}] ${safeText(m.team_home?.name)} ${safeText(m.team_home?.score)} - ${safeText(m.team_away?.score)} ${safeText(m.team_away?.name)} (${safeText(m.status)})</li>`; // Closing bracket was missing here originally, now added.
+             });
+             html += '</ul>'; // Closing ul tag
+             return html;
+        }
+
+    </script>
+
+</body>
+</html>

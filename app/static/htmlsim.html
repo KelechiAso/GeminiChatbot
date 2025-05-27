@@ -3,59 +3,67 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sports Chatbot Client</title>
+    <title>Sports Chatbot Client (SPAI)</title>
     <style>
-        body { font-family: sans-serif; margin: 20px; }
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
+        #chatContainer { max-width: 800px; margin: 0 auto; background-color: #fff; box-shadow: 0 0 15px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
+        h1 { text-align: center; color: #4CAF50; padding: 20px 0; margin: 0; background-color: #e8f5e9; }
         #chatbox {
             height: 400px;
-            border: 1px solid #ccc;
+            border-top: 1px solid #ddd;
+            border-bottom: 1px solid #ddd;
             overflow-y: scroll;
-            margin-bottom: 15px;
-            padding: 10px;
+            padding: 15px;
             background-color: #f9f9f9;
-            border-radius: 5px;
         }
         #ui-components {
             border: 1px solid #e0e0e0;
             padding: 15px;
-            margin-top: 20px;
+            margin: 20px;
             min-height: 100px;
             background-color: #ffffff;
             border-radius: 5px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         }
-        .message { margin: 5px 0; padding: 8px 12px; border-radius: 15px; max-width: 80%; word-wrap: break-word; }
-        .user-message { background-color: #dcf8c6; margin-left: auto; border-bottom-right-radius: 0; }
-        .bot-message { background-color: #e8f0fe; margin-right: auto; border-bottom-left-radius: 0; }
-        .input-area { display: flex; margin-top: 10px; }
-        #userInput { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 5px 0 0 5px; }
-        #sendButton { padding: 10px 15px; border: none; background-color: #4CAF50; color: white; cursor: pointer; border-radius: 0 5px 5px 0; }
+        .message { margin: 8px 0; padding: 10px 15px; border-radius: 18px; max-width: 75%; word-wrap: break-word; line-height: 1.4; }
+        .user-message { background-color: #dcf8c6; margin-left: auto; border-bottom-right-radius: 5px; }
+        .bot-message { background-color: #e8f0fe; margin-right: auto; border-bottom-left-radius: 5px; }
+        .input-area { display: flex; padding: 15px; background-color: #f0f0f0; }
+        #userInput { flex-grow: 1; padding: 12px; border: 1px solid #ccc; border-radius: 20px 0 0 20px; font-size: 1em; }
+        #userInput:focus { outline: none; border-color: #4CAF50; }
+        #sendButton { padding: 12px 20px; border: none; background-color: #4CAF50; color: white; cursor: pointer; border-radius: 0 20px 20px 0; font-size: 1em; }
         #sendButton:hover { background-color: #45a049; }
-        #loadingIndicator { display: none; text-align: center; padding: 10px; color: #555; }
+        #sendButton:disabled { background-color: #aaa; }
+        #loadingIndicator { display: none; text-align: center; padding: 10px; color: #555; font-style: italic; }
         /* Basic Table Styling */
-        table { border-collapse: collapse; width: 100%; margin-top: 15px; font-size: 0.9em; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        table { border-collapse: collapse; width: 100%; margin-top: 15px; font-size: 0.9em; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
         th { background-color: #f2f2f2; font-weight: bold; }
         tr:nth-child(even) { background-color: #f9f9f9; }
-        caption { caption-side: top; font-weight: bold; margin-bottom: 5px; font-size: 1.1em; text-align: left;}
-        h4, h5 { margin-top: 15px; margin-bottom: 5px; color: #333; }
+        caption { caption-side: top; font-weight: bold; margin-bottom: 8px; font-size: 1.1em; text-align: left; color: #333; }
+        h2, h4, h5 { margin-top: 15px; margin-bottom: 10px; color: #333; }
         ul { padding-left: 20px; }
+        hr { border: 0; height: 1px; background: #ddd; margin: 30px 0; }
+        .error-message { color: red; font-style: italic; }
     </style>
 </head>
 <body>
 
-    <h1>Sports Chatbot</h1>
+    <div id="chatContainer">
+        <h1>Sports Chatbot (SPAI)</h1>
 
-    <div id="chatbox">
+        <div id="chatbox">
+            </div>
+
+        <div id="loadingIndicator">Thinking...</div>
+
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="Ask about sports scores, H2H, schedules..." autocomplete="off"/>
+            <button id="sendButton">Send</button>
         </div>
-
-    <div class="input-area">
-        <input type="text" id="userInput" placeholder="Ask about sports scores, H2H, schedules..." autocomplete="off"/>
-        <button id="sendButton" onclick="sendMessage()">Send</button>
     </div>
-     <div id="loadingIndicator">Thinking...</div>
 
-    <hr style="margin: 30px 0;">
+    <hr>
 
     <h2>Dynamic UI Area</h2>
     <div id="ui-components">
@@ -71,21 +79,25 @@
 
         // Generate a simple session ID for history tracking
         const userId = 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+        console.log("User ID for this session:", userId);
 
         // --- Event Listeners ---
         sendButton.addEventListener('click', sendMessage);
         userInput.addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' && !sendButton.disabled) { // Check if button is not disabled
                 sendMessage();
             }
         });
 
         // --- Core Functions ---
-        function appendMessage(text, sender = 'bot') {
+        function appendMessage(text, sender = 'bot', isError = false) {
             const msgDiv = document.createElement('div');
             msgDiv.textContent = text;
             msgDiv.classList.add('message');
             msgDiv.classList.add(sender === 'user' ? 'user-message' : 'bot-message');
+            if (isError) {
+                msgDiv.classList.add('error-message');
+            }
             chatbox.appendChild(msgDiv);
             chatbox.scrollTop = chatbox.scrollHeight; // Auto-scroll
         }
@@ -94,21 +106,22 @@
             const query = userInput.value.trim();
             if (!query) return;
 
-            appendMessage(query, 'user'); // Show user's message immediately
-            userInput.value = ''; // Clear input field
-            userInput.disabled = true; // Disable input during processing
+            appendMessage(query, 'user');
+            userInput.value = ''; 
+            userInput.disabled = true; 
             sendButton.disabled = true;
             loadingIndicator.style.display = 'block';
-            uiComponentsDiv.innerHTML = ''; // Clear previous UI component
+            // uiComponentsDiv.innerHTML = ''; // Clear previous UI component immediately or wait for new data
 
-            // --- API Call ---
+            console.log(`Sending query to /chat: "${query}" for user_id: ${userId}`);
+
             try {
-                // Make sure the backend URL is correct
-                const response = await fetch('http://127.0.0.1:8000/chat', {
+                // Using relative path since HTML is served by the same FastAPI app
+                const response = await fetch('/chat', { 
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Accept': 'application/json' // Explicitly accept JSON
+                        'Accept': 'application/json' 
                     },
                     body: JSON.stringify({
                         user_id: userId,
@@ -116,132 +129,142 @@
                     })
                 });
 
-                // Check if response is OK (status 200-299)
+                console.log("Fetch response status:", response.status, "OK:", response.ok);
+
                 if (!response.ok) {
-                     let errorDetail = `HTTP error! Status: ${response.status}`;
+                     let errorDetail = `Server error! Status: ${response.status}`;
                      try {
-                         // Try to parse potential JSON error from FastAPI
-                         const errorData = await response.json();
-                         errorDetail = errorData.detail || JSON.stringify(errorData);
+                         const errorData = await response.json(); // Try to parse potential JSON error from FastAPI
+                         console.error("Server error data:", errorData);
+                         errorDetail = errorData.detail || errorData.reply || JSON.stringify(errorData);
                      } catch (parseError) {
-                         // If response is not JSON, use status text
-                         errorDetail = response.statusText || errorDetail;
+                         // If response is not JSON, use status text or full text
+                         const textError = await response.text();
+                         console.error("Server error text (not JSON):", textError);
+                         errorDetail = textError || response.statusText || errorDetail;
                      }
                     throw new Error(errorDetail);
                 }
 
-                // Parse the JSON response from the backend
-                const data = await response.json(); // Expects {reply: "...", ui_data: {...}}
+                console.log("Attempting to parse JSON from response...");
+                const data = await response.json(); 
+                console.log("Data received and parsed from /chat:", data);
 
-                // --- Process Successful Response ---
-                appendMessage(data.reply, 'bot'); // Display text reply
-                renderUiComponent(data.ui_data); // Render UI based on ui_data
+                if (data && data.reply !== undefined) { // Check if data and data.reply exist
+                    appendMessage(data.reply, 'bot');
+                } else {
+                    console.error("Parsed data is missing 'reply' field or data itself is null/undefined:", data);
+                    appendMessage("Received an incomplete or unexpected response structure from the bot.", 'bot', true);
+                }
+
+                if (data && data.ui_data !== undefined) { // Check if data and data.ui_data exist
+                    renderUiComponent(data.ui_data);
+                } else {
+                    console.warn("Parsed data is missing 'ui_data' field:", data);
+                    uiComponentsDiv.innerHTML = '<p>No specific UI data provided in this response.</p>'; // Clear or set default for ui area
+                }
 
             } catch (error) {
-                console.error('Error sending/receiving message:', error);
-                appendMessage(`Error: ${error.message || 'Could not connect to the service.'}`, 'bot'); // Display error in chat
-                uiComponentsDiv.innerHTML = `<p style="color: red;">Failed to load UI component: ${error.message}</p>`; // Show error in UI area
+                console.error('Error in sendMessage (fetch or processing response):', error);
+                appendMessage(`Error: ${error.message || 'Could not connect or process the response.'}`, 'bot', true);
+                uiComponentsDiv.innerHTML = `<p class="error-message">Failed to load UI component: ${error.message}</p>`;
             } finally {
-                // Re-enable input regardless of success or failure
                 userInput.disabled = false;
                 sendButton.disabled = false;
                 loadingIndicator.style.display = 'none';
-                userInput.focus(); // Focus back on input
+                userInput.focus(); 
             }
         }
 
         function renderUiComponent(uiData) {
-            // Clear previous UI component content
-            uiComponentsDiv.innerHTML = '';
+            uiComponentsDiv.innerHTML = ''; // Clear previous UI component content
 
-            if (!uiData || !uiData.component_type || typeof uiData.data === 'undefined') { // Check data exists
-                console.warn("Received invalid or empty ui_data structure.");
-                 uiComponentsDiv.innerHTML = '<p>No specific UI data to display for this response.</p>'; // Inform user
+            if (!uiData || typeof uiData.component_type === 'undefined' || typeof uiData.data === 'undefined') {
+                console.warn("Received invalid or empty ui_data structure for rendering:", uiData);
+                 uiComponentsDiv.innerHTML = '<p>No specific UI data to display for this response.</p>';
                 return;
             }
 
-            console.log("Attempting to render UI Component:", uiData.component_type); // Debugging
+            console.log("Attempting to render UI Component Type:", uiData.component_type, "with data:", uiData.data);
 
-            // --- Call specific rendering functions based on type ---
             try {
                  switch (uiData.component_type) {
-                    case 'html_table':
-                    console.log(">>> Entered 'html_table' case. Full uiData:", JSON.stringify(uiData, null, 2)); // Log the whole object clearly
-
-                    // Check if the data object exists and is truthy
-                    if (uiData.data) {
-                        console.log(">>> uiData.data exists.");
-
-                        // Check if html_string exists within data AND is not empty
-                        if (uiData.data.html_string && uiData.data.html_string.trim() !== '') {
-                            // Log the first part of the HTML string to verify it looks okay
-                            console.log(">>> uiData.data.html_string exists and is not empty. Value starts with:", uiData.data.html_string.substring(0, 150) + "...");
-
-                            try {
-                                // Attempt to set the innerHTML
-                                uiComponentsDiv.innerHTML = uiData.data.html_string;
-                                console.log(">>> SUCCESS: innerHTML was set for the table."); // Log success
-                            } catch (e) {
-                                // Catch potential errors during the actual rendering by the browser
-                                console.error("!!! ERROR setting innerHTML:", e);
-                                uiComponentsDiv.innerHTML = '<p style="color: red;">Error trying to display table content.</p>';
-                            }
-                        } else {
-                            // html_string is missing or falsy (e.g., empty string)
-                            console.error("!!! uiData.data exists, BUT html_string is missing or empty. Value:", uiData.data.html_string);
-                            uiComponentsDiv.innerHTML = '<p>Received table format but HTML content appears empty.</p>';
-                        }
-                    } else {
-                        // data object itself is missing or falsy
-                        console.error("!!! uiData.data object is missing or falsy:", uiData);
-                        uiComponentsDiv.innerHTML = '<p>Received table component type but the data object itself is missing.</p>';
-                    }
-                    break; // Don't forget the break statement
                     case 'h2h_comparison_table':
                         uiComponentsDiv.innerHTML = generateH2HTableHTML(uiData.data);
                         break;
-                    case 'match_schedule_by_league':
-                        uiComponentsDiv.innerHTML = generateScheduleTablesHTML(uiData.data);
+                    case 'match_schedule_table': // Assuming 'match_schedule_table' from previous discussions
+                        uiComponentsDiv.innerHTML = generateScheduleTableHTML(uiData.data); // Renamed for clarity
                         break;
                     case 'standings_table':
                         uiComponentsDiv.innerHTML = generateStandingsTableHTML(uiData.data);
                         break;
-                    case 'team_stats': // Assuming a component type for team stats comparison
-                        uiComponentsDiv.innerHTML = generateTeamStatsTableHTML(uiData.data);
+                    case 'team_stats':
+                        uiComponentsDiv.innerHTML = generateTeamStatsHTML(uiData.data); // Renamed for clarity
                         break;
-                    case 'results_list': // Assuming a type for simple results
+                    case 'results_list':
                          uiComponentsDiv.innerHTML = generateResultsListHTML(uiData.data);
                          break;
-                    // Add cases for other component types you define
+                    case 'live_match_feed':
+                         uiComponentsDiv.innerHTML = generateLiveMatchFeedHTML(uiData.data);
+                         break;
+                    case 'match_lineups_display':
+                         uiComponentsDiv.innerHTML = generateMatchLineupsHTML(uiData.data);
+                         break;
+                    case 'top_performers_list':
+                         uiComponentsDiv.innerHTML = generateTopPerformersHTML(uiData.data);
+                         break;
+                    case 'player_profile_card':
+                         uiComponentsDiv.innerHTML = generatePlayerProfileHTML(uiData.data);
+                         break;
+                    case 'player_comparison_view':
+                         uiComponentsDiv.innerHTML = generatePlayerComparisonHTML(uiData.data);
+                         break;
+                    case 'term_explanation_box':
+                         uiComponentsDiv.innerHTML = generateTermExplanationHTML(uiData.data);
+                         break;
+                    case 'news_article_list':
+                         uiComponentsDiv.innerHTML = generateNewsListHTML(uiData.data);
+                         break;
+                    case 'suggestion_card':
+                         uiComponentsDiv.innerHTML = generateSuggestionCardHTML(uiData.data);
+                         break;
+                    case 'percentage_card':
+                         uiComponentsDiv.innerHTML = generatePercentageCardHTML(uiData.data);
+                         break;
                     case 'generic_text':
                     default:
-                        uiComponentsDiv.innerHTML = '<p>No specific UI data to display for this response.</p>';
+                        // If data has a message field for generic_text, display it
+                        if (uiData.data && uiData.data.message) {
+                            uiComponentsDiv.innerHTML = `<p>${safeText(uiData.data.message)}</p>`;
+                        } else if (uiData.data && Object.keys(uiData.data).length > 0) {
+                            // Fallback for generic_text with some data: display as preformatted JSON
+                            uiComponentsDiv.innerHTML = `<h4>Generic Data</h4><pre>${safeText(JSON.stringify(uiData.data, null, 2))}</pre>`;
+                        }
+                        else {
+                            uiComponentsDiv.innerHTML = '<p>No specific UI data to display for this response.</p>';
+                        }
                         break;
                 }
             } catch (renderError) {
-                console.error(`Error rendering component ${uiData.component_type}:`, renderError);
-                uiComponentsDiv.innerHTML = `<p style="color: red;">Error displaying UI component for ${uiData.component_type}.</p>`;
+                console.error(`Error rendering component ${uiData.component_type}:`, renderError, "Data was:", uiData.data);
+                uiComponentsDiv.innerHTML = `<p class="error-message">Error displaying UI component for ${uiData.component_type}. Check console.</p>`;
             }
         }
 
         // --- HTML Generation Functions ---
-        // These functions take the specific 'data' part of ui_data and return HTML strings
-
         function safeText(text) {
-             // Basic protection against HTML injection - use a proper sanitizer in production!
              if (text === null || typeof text === 'undefined') return 'N/A';
              const div = document.createElement('div');
-             div.textContent = String(text);
-             return div.innerHTML;
+             div.textContent = String(text); // Ensures text is treated as text, not HTML
+             return div.innerHTML; // Gets the HTML-escaped version
         }
 
+        // H2H Table
         function generateH2HTableHTML(data) {
-             if (!data || !data.h2h_summary) return '<p>Head-to-head data is incomplete.</p>';
-
+            if (!data || !data.h2h_summary) return '<p>Head-to-head data is incomplete.</p>';
             let html = '<h4>Head-to-Head Comparison</h4>';
             const t1 = data.h2h_summary.team1 || {};
             const t2 = data.h2h_summary.team2 || {};
-
             html += `
                 <table>
                     <thead><tr><th>Stat</th><th>${safeText(t1.name) || 'Team 1'}</th><th>${safeText(t2.name) || 'Team 2'}</th></tr></thead>
@@ -253,65 +276,51 @@
                         <tr><td>Goals Against</td><td>${safeText(t1.goals_against)}</td><td>${safeText(t2.goals_against)}</td></tr>
                     </tbody>
                 </table>
-                <p>Total Matches: ${safeText(data.h2h_summary.total_matches)}</p>
-            `; // Closing backtick was missing here originally, now added.
-
+                <p>Total Matches: ${safeText(data.h2h_summary.total_matches)}</p>`;
             if (data.recent_meetings && data.recent_meetings.length > 0) {
                 html += '<h5>Recent Meetings</h5><ul>';
                 data.recent_meetings.forEach(m => {
-                    html += `<li>${safeText(m.date)}: ${safeText(m.competition)} - ${safeText(m.score)}</li>`;
+                    html += `<li>${safeText(m.date)}: ${safeText(m.competition || '')} - ${safeText(m.score)}</li>`;
                 });
-                html += '</ul>'; // Closing ul
+                html += '</ul>';
             }
             return html;
         }
 
-        function generateScheduleTablesHTML(data) {
-            if (!data || !data.leagues || Object.keys(data.leagues).length === 0) {
-                 return '<h4>Upcoming Matches</h4><p>No upcoming matches found based on your query.</p>';
+        // Schedule Table
+        function generateScheduleTableHTML(data) {
+            if (!data || !data.rows || data.rows.length === 0) {
+                 return `<h4>${safeText(data.title) || 'Upcoming Matches'}</h4><p>No schedule data found.</p>`;
             }
-
-            let html = '<h4>Upcoming Matches by League</h4>';
-            for (const leagueName in data.leagues) {
-                 const matches = data.leagues[leagueName];
-                 if (matches.length > 0) {
-                     html += `<h5>${safeText(leagueName)}</h5>`;
-                     html += `
-                        <table>
-                            <thead><tr><th>Date</th><th>Time</th><th>Home Team</th><th>Away Team</th><th>Popular</th></tr></thead>
-                            <tbody>`; // Closing bracket was missing here originally, now added.
-                     matches.forEach(m => {
-                         html += `
-                            <tr>
-                                <td>${safeText(m.date)}</td>
-                                <td>${safeText(m.time)}</td>
-                                <td>${safeText(m.team_home?.name)}</td>
-                                <td>${safeText(m.team_away?.name)}</td>
-                                <td>${m.is_popular ? 'Yes' : 'No'}</td>
-                            </tr>`; // Closing bracket was missing here originally, now added.
-                     });
-                     html += `</tbody></table>`; // Closing table tags
-                 } else {
-                     html += `<h5>${safeText(leagueName)}</h5><p>No matches found for this league.</p>`;
-                 }
-            }
+            let html = `<h4>${safeText(data.title) || 'Match Schedule'}</h4>`;
+            if(data.sort_info) html += `<p><small>${safeText(data.sort_info)}</small></p>`;
+            html += '<table><thead><tr>';
+            (data.headers || []).forEach(header => html += `<th>${safeText(header)}</th>`);
+            html += '</tr></thead><tbody>';
+            data.rows.forEach(row => {
+                html += '<tr>';
+                row.forEach(cell => html += `<td>${safeText(cell)}</td>`);
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
             return html;
         }
 
+        // Standings Table
          function generateStandingsTableHTML(data) {
              if (!data || !data.standings || data.standings.length === 0) {
                  return `<h4>${safeText(data.league_name) || 'League'} Standings</h4><p>Standings data not available.</p>`;
              }
-             let html = `<h4>${safeText(data.league_name)} Standings</h4>`;
+             let html = `<h4>${safeText(data.league_name)} ${safeText(data.season) || ''} Standings</h4>`;
              html += `
                 <table>
-                    <thead><tr><th>Rank</th><th>Team</th><th>Pl</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr></thead>
-                    <tbody>`; // Closing bracket was missing here originally, now added.
+                    <thead><tr><th>Rank</th><th>Team</th><th>Pl</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th><th>Form</th></tr></thead>
+                    <tbody>`;
              data.standings.forEach(t => {
                  html += `
                     <tr>
                         <td>${safeText(t.rank)}</td>
-                        <td>${safeText(t.team_name)}</td>
+                        <td>${t.logo_url ? `<img src="${safeText(t.logo_url)}" alt="${safeText(t.team_name)}" style="width:20px; height:20px; margin-right:5px; vertical-align:middle;">` : ''}${safeText(t.team_name)}</td>
                         <td>${safeText(t.played)}</td>
                         <td>${safeText(t.wins)}</td>
                         <td>${safeText(t.draws)}</td>
@@ -320,43 +329,202 @@
                         <td>${safeText(t.goals_against)}</td>
                         <td>${safeText(t.goal_difference)}</td>
                         <td><b>${safeText(t.points)}</b></td>
-                    </tr>`; // Closing bracket was missing here originally, now added.
+                        <td>${safeText(t.form)}</td>
+                    </tr>`;
              });
-             html += `</tbody></table>`; // Closing table tags
+             html += `</tbody></table>`;
              return html;
         }
 
-         function generateTeamStatsTableHTML(data) {
-             if (!data || !data.team_stats_comparison || data.team_stats_comparison.length === 0) {
-                 return '<h4>Team Statistics</h4><p>Statistics not available.</p>';
-             }
-            let html = `<h4>Team Statistics Comparison</h4>`;
-            // Simple example, adapt columns based on sport/available data
-            html += `<table><thead><tr><th>Team</th><th>Form (Last ${safeText(data.team_stats_comparison[0]?.last_n_matches ?? 'N')})</th><th>GF</th><th>GC</th><th>Avg Poss%</th></tr></thead><tbody>`; // Closing bracket was missing, check optional chaining
-            data.team_stats_comparison.forEach(t => {
-                 html += `
-                    <tr>
-                        <td>${safeText(t.team_name)}</td>
-                        <td>${safeText(t.form?.join(', '))}</td>
-                        <td>${safeText(t.goals_scored)}</td>
-                        <td>${safeText(t.goals_conceded)}</td>
-                        <td>${safeText(t.avg_possession)}</td>
-                    </tr>`; // Closing bracket was missing here originally, now added.
-            });
-            html += `</tbody></table>`; // Closing table tags
+        // Team Stats
+        function generateTeamStatsHTML(data) {
+            if (!data || (!data.sections && !data.narrative_summary)) {
+                return `<h4>${safeText(data.title) || 'Statistics'}</h4><p>Statistics not available.</p>`;
+            }
+            let html = `<h4>${safeText(data.title) || 'Statistics'} <small>(${safeText(data.stats_type)})</small></h4>`;
+            if(data.narrative_summary) {
+                html += `<p>${safeText(data.narrative_summary)}</p>`;
+            }
+            if(data.sections && data.sections.length > 0) {
+                data.sections.forEach(section => {
+                    html += `<h5>${safeText(section.section_title)}</h5>`;
+                    if (section.key_value_pairs && Object.keys(section.key_value_pairs).length > 0) {
+                        html += '<ul>';
+                        for (const key in section.key_value_pairs) {
+                            html += `<li><strong>${safeText(key)}:</strong> ${safeText(section.key_value_pairs[key])}</li>`;
+                        }
+                        html += '</ul>';
+                    } else {
+                        html += '<p>No specific stats in this section.</p>';
+                    }
+                });
+            }
             return html;
         }
 
-         function generateResultsListHTML(data) {
+        // Results List
+        function generateResultsListHTML(data) {
             if (!data || !data.matches || data.matches.length === 0) {
                 return `<h4>Match Results</h4><p>No recent results found.</p>`;
             }
-             let html = '<h4>Match Results</h4><ul>'; // Closing bracket was missing here originally, now added.
-             data.matches.forEach(m => {
-                 html += `<li>${safeText(m.date)} ${safeText(m.time)} [${safeText(m.competition)}] ${safeText(m.team_home?.name)} ${safeText(m.team_home?.score)} - ${safeText(m.team_away?.score)} ${safeText(m.team_away?.name)} (${safeText(m.status)})</li>`; // Closing bracket was missing here originally, now added.
+            let html = '<h4>Match Results</h4><ul>';
+            data.matches.forEach(m => {
+                let scoreStr = 'N/A';
+                if (m.score && m.score.fulltime) {
+                    scoreStr = `${safeText(m.score.fulltime.home)} - ${safeText(m.score.fulltime.away)}`;
+                }
+                html += `<li>${safeText(m.date)} ${safeText(m.time || '')} [${safeText(m.competition || m.round || '')}] ${safeText(m.home_team_name)} ${scoreStr} ${safeText(m.away_team_name)} (${safeText(m.status)})</li>`;
+            });
+            html += '</ul>';
+            return html;
+        }
+
+        // --- Placeholder Render Functions for NEW Tools (Implement these based on your schemas) ---
+        function generateLiveMatchFeedHTML(data) {
+            if (!data) return '<h4>Live Match</h4><p>Live match data unavailable.</p>';
+            let html = `<h4>Live: ${safeText(data.home_team_name)} ${safeText(data.home_team_score)} - ${safeText(data.away_team_score)} ${safeText(data.away_team_name)}</h4>`;
+            html += `<p>Competition: ${safeText(data.competition)} | Minute: ${safeText(data.current_minute)} (${safeText(data.status_description)})</p>`;
+            if (data.key_events && data.key_events.length > 0) {
+                html += '<h5>Key Events:</h5><ul>';
+                data.key_events.forEach(event => {
+                    html += `<li>${safeText(event.minute)}' - ${safeText(event.type)}: ${safeText(event.player_name || '')} (${safeText(event.team_name)}) ${safeText(event.detail || '')}</li>`;
+                });
+                html += '</ul>';
+            }
+            // Add live_stats display if available
+            return html;
+        }
+
+        function generateMatchLineupsHTML(data) {
+            if (!data || !data.home_team || !data.away_team) return '<h4>Match Lineups</h4><p>Lineup data unavailable.</p>';
+            let html = `<h4>Lineups: ${safeText(data.match_description)}</h4>`;
+            function renderTeamLineup(teamData, teamTitle) {
+                let teamHtml = `<h5>${safeText(teamTitle)}: ${safeText(teamData.name)} (${safeText(teamData.formation || 'N/A')})</h5>`;
+                if(teamData.manager) teamHtml += `<p><small>Manager: ${safeText(teamData.manager)}</small></p>`;
+                teamHtml += '<h6>Starting XI:</h6><ul>';
+                (teamData.starting_xi || []).forEach(p => teamHtml += `<li>${safeText(p.jersey_number || '#')}. ${safeText(p.player_name)} (${safeText(p.position || 'N/A')})</li>`);
+                teamHtml += '</ul><h6>Substitutes:</h6><ul>';
+                (teamData.substitutes || []).forEach(p => teamHtml += `<li>${safeText(p.jersey_number || '#')}. ${safeText(p.player_name)} (${safeText(p.position || 'N/A')})</li>`);
+                teamHtml += '</ul>';
+                return teamHtml;
+            }
+            html += renderTeamLineup(data.home_team, "Home Team");
+            html += renderTeamLineup(data.away_team, "Away Team");
+            return html;
+        }
+
+        function generateTopPerformersHTML(data) {
+            if (!data || !data.performers || data.performers.length === 0) return `<h4>${safeText(data.statistic_type) || 'Top Performers'}</h4><p>Data unavailable.</p>`;
+            let html = `<h4>${safeText(data.league_name)} ${safeText(data.season) || ''} - ${safeText(data.statistic_type)}</h4>`;
+            html += '<table><thead><tr><th>Rank</th><th>Player</th><th>Team</th><th>Value</th><th>Nationality</th></tr></thead><tbody>';
+            data.performers.forEach(p => {
+                html += `<tr><td>${safeText(p.rank)}</td><td>${safeText(p.player_name)}</td><td>${safeText(p.team_name)}</td><td>${safeText(p.value)}</td><td>${safeText(p.nationality)}</td></tr>`;
+            });
+            html += '</tbody></table>';
+            return html;
+        }
+
+        function generatePlayerProfileHTML(data) {
+            if (!data || !data.full_name) return '<h4>Player Profile</h4><p>Player data unavailable.</p>';
+            let html = `<h4>Player Profile: ${safeText(data.full_name)} ${data.common_name ? `(${safeText(data.common_name)})` : ''}</h4>`;
+            html += '<ul>';
+            html += `<li><strong>Nationality:</strong> ${safeText(data.nationality)}</li>`;
+            html += `<li><strong>Date of Birth:</strong> ${safeText(data.date_of_birth)} (Age: ${safeText(data.age)})</li>`;
+            html += `<li><strong>Position:</strong> ${safeText(data.primary_position)} ${data.secondary_positions && data.secondary_positions.length > 0 ? `(${data.secondary_positions.map(safeText).join(', ')})` : ''}</li>`;
+            html += `<li><strong>Current Club:</strong> ${safeText(data.current_club_name)} (#${safeText(data.jersey_number)})</li>`;
+            if(data.height_cm) html += `<li><strong>Height:</strong> ${safeText(data.height_cm)} cm</li>`;
+            if(data.weight_kg) html += `<li><strong>Weight:</strong> ${safeText(data.weight_kg)} kg</li>`;
+            if(data.preferred_foot) html += `<li><strong>Preferred Foot:</strong> ${safeText(data.preferred_foot)}</li>`;
+            if(data.market_value) html += `<li><strong>Market Value:</strong> ${safeText(data.market_value)}</li>`;
+            if(data.career_summary_stats){
+                html += `<li><strong>Career Summary:</strong> Appearances: ${safeText(data.career_summary_stats.appearances)}, Goals: ${safeText(data.career_summary_stats.goals)}, Assists: ${safeText(data.career_summary_stats.assists)}</li>`;
+            }
+            html += '</ul>';
+            return html;
+        }
+
+        function generatePlayerComparisonHTML(data) {
+             if (!data || !data.players || data.players.length < 2) return '<h4>Player Comparison</h4><p>Insufficient data for comparison.</p>';
+             let html = `<h4>${safeText(data.comparison_title)} <small>(${safeText(data.comparison_period)})</small></h4>`;
+             // Determine all unique stat keys for table headers
+             const allStatKeys = new Set();
+             data.players.forEach(player => {
+                 if(player.stats) Object.keys(player.stats).forEach(key => allStatKeys.add(key));
              });
-             html += '</ul>'; // Closing ul tag
+             const headers = ['Player', 'Team', ...Array.from(allStatKeys).sort()];
+
+             html += '<table><thead><tr>';
+             headers.forEach(header => html += `<th>${safeText(header)}</th>`);
+             html += '</tr></thead><tbody>';
+
+             data.players.forEach(player => {
+                 html += '<tr>';
+                 html += `<td>${safeText(player.player_name)}</td>`;
+                 html += `<td>${safeText(player.team_name)}</td>`;
+                 headers.slice(2).forEach(statKey => { // Slice to skip Player and Team
+                     html += `<td>${safeText(player.stats ? player.stats[statKey] : 'N/A')}</td>`;
+                 });
+                 html += '</tr>';
+             });
+             html += '</tbody></table>';
              return html;
+        }
+
+        function generateTermExplanationHTML(data) {
+            if (!data || !data.term) return '<h4>Term Explanation</h4><p>Data unavailable.</p>';
+            let html = `<h4>Explanation: ${safeText(data.term)} ${data.sport ? `(${safeText(data.sport)})` : ''}</h4>`;
+            html += `<p>${safeText(data.explanation)}</p>`;
+            if (data.related_terms && data.related_terms.length > 0) {
+                html += '<h5>Related Terms:</h5><ul>';
+                data.related_terms.forEach(term => html += `<li>${safeText(term)}</li>`);
+                html += '</ul>';
+            }
+            return html;
+        }
+
+        function generateNewsListHTML(data) { // For team or league news
+            if (!data || !data.news_articles || data.news_articles.length === 0) {
+                return `<h4>${safeText(data.team_name || data.league_name || 'News')}</h4><p>No news articles found.</p>`;
+            }
+            let html = `<h4>Latest News for ${safeText(data.team_name || data.league_name)}</h4><ul>`;
+            data.news_articles.forEach(article => {
+                html += `<li>
+                            <strong>${safeText(article.title)}</strong> - <small>${safeText(article.source_name)} (${safeText(new Date(article.published_date).toLocaleDateString())})</small>
+                            <p>${safeText(article.summary)}</p>
+                         </li>`;
+                         // No URLs as per requirement: <a href="${safeText(article.url)}" target="_blank">Read more</a>
+            });
+            html += '</ul>';
+            return html;
+        }
+        function generateSuggestionCardHTML(data) {
+            if (!data || !data.title) return '<h4>Suggestion</h4><p>Data unavailable.</p>';
+            let html = `<h4>${safeText(data.title)}</h4>`;
+            html += `<p>${safeText(data.details)}</p>`;
+            if (data.key_points && data.key_points.length > 0) {
+                html += '<h5>Key Points:</h5><ul>';
+                data.key_points.forEach(point => html += `<li>${safeText(point)}</li>`);
+                html += '</ul>';
+            }
+            if(data.confidence_level) html += `<p><small>Confidence: ${safeText(data.confidence_level)}</small></p>`;
+            html += `<p><small><em>${safeText(data.disclaimer)}</em></small></p>`;
+            return html;
+        }
+
+        function generatePercentageCardHTML(data) {
+            if (!data || !data.title) return '<h4>Percentage Analysis</h4><p>Data unavailable.</p>';
+            let html = `<h4>${safeText(data.title)}</h4>`;
+            html += `<h2>${safeText(data.value)}</h2>`;
+            html += `<p><strong>Context:</strong> ${safeText(data.context)}</p>`;
+            if(data.basis) html += `<p><strong>Basis:</strong> ${safeText(data.basis)}</p>`;
+            if(data.supporting_stats && Object.keys(data.supporting_stats).length > 0){
+                html += '<h5>Supporting Stats:</h5><ul>';
+                for(const key in data.supporting_stats){
+                    html += `<li><strong>${safeText(key)}:</strong> ${safeText(data.supporting_stats[key])}</li>`;
+                }
+                html += '</ul>';
+            }
+            return html;
         }
 
     </script>

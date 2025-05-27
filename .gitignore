@@ -1,0 +1,13 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env  # IMPORTANT: Add this line
+*.env
+*~
+*.swp
+.DS_Store
+.idea/
+.vscode/

@@ -1,4 +1,7 @@
 # /app/main.py
+"""
+
+
 
 import json
 import traceback
@@ -169,3 +172,17 @@ async def handle_chat(request: ChatRequest):
         )
 
 # ... (rest of the file, e.g., running instructions)
+
+
+"""
+from fastapi import FastAPI
+
+app = FastAPI(title="Test App")
+
+@app.get("/")
+def read_root():
+    return {"Hello": "Railway"}
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok - test"}

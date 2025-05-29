@@ -1,5 +1,5 @@
-# app/main.py
-print("--- app/main.py: TOP OF FILE (Full Chat Logic Test) ---")
+# /app/main.py
+print("--- app/main.py: TOP OF FILE ---")
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -13,7 +13,6 @@ import pprint
 
 print("--- app/main.py: Standard imports DONE ---")
 
-# Attempt to import from openai_service
 try:
     print("--- app/main.py: Attempting to import from api.openai_service ---")
     from api.openai_service import (
@@ -23,14 +22,19 @@ try:
     )
     print("--- app/main.py: SUCCESSFULLY IMPORTED from api.openai_service ---")
 except ImportError as e:
-    print(f"--- app/main.py: !!! FAILED to import from api.openai_service: {e} !!! ---")
-    # Define placeholders if import fails, so app can at least start for basic routes
-    async def extract_sports_info(*args, **kwargs): return {"input_type": "error", "message": "AI service not loaded"}
-    async def fetch_raw_text_data(*args, **kwargs): return "-- AI SERVICE NOT LOADED --"
-    async def get_structured_data_and_reply_via_tools(*args, **kwargs): return {"reply": "AI service not loaded", "ui_data": {"component_type": "generic_text", "data": {}}}
+    print(f"--- app/main.py: !!! FAILED to import from api.openai_service due to ImportError: {e} !!! ---")
+    traceback.print_exc() 
+    raise e # CRITICAL: Re-raise to make app crash if service can't load
+except Exception as e: 
+    print(f"--- app/main.py: !!! FAILED to import from api.openai_service due to OTHER error: {e} !!! ---")
+    traceback.print_exc()
+    raise e # CRITICAL: Re-raise
 
 
-app = FastAPI(title="SPAI - Full Chat Logic Test") # Updated title
+app = FastAPI(
+    title="Sports Chatbot Microservice (SPAI) - v2.1",
+    description="Provides sports and gaming info using OpenAI tools and domain enforcement."
+)
 print("--- app/main.py: FastAPI INSTANCE CREATED ---")
 
 # --- CORS ---
@@ -59,58 +63,54 @@ conversation_histories: Dict[str, List[Dict[str, str]]] = {}
 HISTORY_LIMIT = 10
 print("--- app/main.py: Conversation History Store INITIALIZED ---")
 
-
 # --- Serve Static HTML File for the Root Path ---
 @app.get("/", response_class=FileResponse)
 async def read_index():
     print("--- app/main.py: / endpoint CALLED ---")
     html_file_path = "app/static/htmlsim.html"
     try:
-        if not os.path.exists(html_file_path): # Basic check
+        if not os.path.exists(html_file_path):
             print(f"--- app/main.py: ERROR - {html_file_path} NOT FOUND for / endpoint ---")
-            # Fallback or raise HTTPException for a proper 404 if file not found
-            raise HTTPException(status_code=404, detail="Index HTML not found.")
+            raise HTTPException(status_code=404, detail="Index HTML not found. Ensure app/static/htmlsim.html exists.")
         print(f"--- app/main.py: Attempting to serve {html_file_path} for / endpoint ---")
         return FileResponse(html_file_path)
     except Exception as e:
         print(f"--- app/main.py: ERROR in / endpoint: {e} ---")
-        raise HTTPException(status_code=500, detail="Internal server error serving index.")
-
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal server error serving index: {str(e)}")
 
 @app.get("/health")
 async def health_check():
     print("--- app/main.py: /health endpoint CALLED ---")
-    return {"status": "ok_full_chat_logic_test"}
+    return {"status": "ok_v2.1"}
 
-
-# --- Main Chat Endpoint (Re-instated) ---
+# --- Main Chat Endpoint ---
 @app.post("/chat", response_model=ChatResponse)
 async def handle_chat(request: ChatRequest):
-    print(f"--- app/main.py: /chat endpoint CALLED by user: {request.user_id} ---")
+    print(f"--- app/main.py: /chat endpoint CALLED by user: {request.user_id} with query: '{request.query[:30]}...' ---")
     user_id = request.user_id
     user_query = request.query
     if not user_query:
         print("--- app/main.py: /chat - Query is empty ---")
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
-    final_reply = "Sorry, I encountered an issue processing your sports/gaming request."
-    final_ui_data = {"component_type": "generic_text", "data": {"message": "No UI data to display."}}
+    # Initialize defaults for this request
+    final_reply = "Sorry, I'm having trouble processing sports/gaming requests right now."
+    final_ui_data = {"component_type": "generic_text", "data": {"message": "Default error UI."}}
     current_history = conversation_histories.get(user_id, [])
-    parsed_info = None
-
+    
     try:
         # --- Step 0: Extract Intent/Entities ---
-        print(f"\n--- Step 0 (main.py): Extracting info for query: '{user_query[:50]}...' ---")
+        print(f"--- Step 0 (main.py): Extracting info for query: '{user_query[:50]}...' ---")
         parsed_info = await extract_sports_info(user_query, current_history)
         
         if not isinstance(parsed_info, dict) or parsed_info.get("input_type") == "error":
-             error_msg = parsed_info.get('message', 'Query parsing failed')
+             error_msg = parsed_info.get('message', 'Query parsing failed at Step 0.')
              print(f"!!! Step 0 (main.py): Extraction failed or returned error: {error_msg}")
-             # Return a valid ChatResponse for client-side handling
-             return ChatResponse(reply=f"Error understanding request: {error_msg}", ui_data=final_ui_data)
+             return ChatResponse(reply=f"Error understanding your request: {error_msg}", ui_data=final_ui_data)
         
         print(f"--- Step 0 (main.py) Result (parsed_info):")
-        pprint.pprint(parsed_info) # Pretty print for better log readability
+        pprint.pprint(parsed_info)
 
         input_type_from_step_0 = parsed_info.get("input_type")
         direct_reply_from_step_0 = parsed_info.get("conversation")
@@ -120,17 +120,16 @@ async def handle_chat(request: ChatRequest):
            direct_reply_from_step_0 and \
            isinstance(direct_reply_from_step_0, str) and \
            direct_reply_from_step_0.strip():
-            print(f"--- Step 0 (main.py) identified as '{input_type_from_step_0}' with a direct reply. Short-circuiting. ---")
+            print(f"--- Step 0 (main.py) identified as '{input_type_from_step_0}'. Short-circuiting with direct reply. ---")
             final_reply = direct_reply_from_step_0
             if input_type_from_step_0 == "out_of_scope_request":
-                final_ui_data = {"component_type": "generic_text", "data": {"message": "Query outside of defined scope."}}
-            # final_ui_data remains default generic_text for other short-circuited replies
+                final_ui_data = {"component_type": "generic_text", "data": {"message": "This query is outside of my sports/gaming expertise."}}
+            else: # For other short-circuits, keep ui_data generic
+                final_ui_data = {"component_type": "generic_text", "data": {}}
         else:
-            # --- Full pipeline with Tool Calling for Step 2 ---
-            print(f"--- Step 1 (main.py): Attempting to fetch raw text data (if applicable for input_type: {input_type_from_step_0}) ---")
+            print(f"--- Step 1 (main.py): Attempting to fetch raw text data for input_type: {input_type_from_step_0} ---")
             raw_text_data = await fetch_raw_text_data(user_query, parsed_info, current_history)
-            print(f"--- Step 1 (main.py) Result (raw_text_data snippet): {raw_text_data[:100]}... ---")
-
+            print(f"--- Step 1 (main.py) Result (raw_text_data snippet): {str(raw_text_data)[:150]}... ---")
 
             print(f"--- Step 2 (main.py): Generating reply and UI data via Tool Calling ---")
             final_data_dict = await get_structured_data_and_reply_via_tools(
@@ -139,19 +138,17 @@ async def handle_chat(request: ChatRequest):
                 raw_text_data
             )
 
-            # --- Step 3 (main.py): Processing final dict from Step 2 ---
             if not isinstance(final_data_dict, dict) or "reply" not in final_data_dict or "ui_data" not in final_data_dict:
-                 print(f"!!! Step 3 (main.py) ERROR: Tool calling step did not return valid dict structure. Using fallback replies.")
-                 # final_reply and final_ui_data will use their initial default error messages
+                 print(f"!!! Step 3 (main.py) ERROR: Tool calling step (Step 2) returned invalid dict structure. Response: {str(final_data_dict)[:200]}")
+                 # final_reply uses its default error message
             else:
-                 final_reply = final_data_dict.get("reply", "Request processed.")
-                 final_ui_data = final_data_dict.get("ui_data", {"component_type": "generic_text", "data": {"message": "UI data was expected but not fully generated."}})
+                 final_reply = final_data_dict.get("reply", "Processed your sports/gaming request.")
+                 final_ui_data = final_data_dict.get("ui_data", {"component_type": "generic_text", "data": {"message": "No specific UI data was generated."}})
                  print(f">>> Step 3 (main.py): Successfully received reply/ui_data. UI Component: {final_ui_data.get('component_type')}")
         
-        if not final_reply or not final_reply.strip():
-            if input_type_from_step_0 == "acknowledgment": final_reply = "Okay."
-            else: final_reply = "Request processed. Ask me about sports or gaming!"
-
+        if not final_reply or not final_reply.strip(): # Ensure there's always some reply
+            if input_type_from_step_0 == "acknowledgment": final_reply = "Noted."
+            else: final_reply = "Your sports/gaming query has been processed."
 
         # --- Step 4: Update History ---
         print(f"--- Step 4 (main.py): Updating History ---")
@@ -165,24 +162,23 @@ async def handle_chat(request: ChatRequest):
         conversation_histories[user_id] = current_history[-HISTORY_LIMIT:]
         print(f">>> History for {user_id} updated. Length: {len(conversation_histories[user_id])}")
 
-        # --- Step 5: Assemble and Return ---
         final_response_object = ChatResponse(reply=final_reply, ui_data=final_ui_data)
-        print("--- Request processing complete (main.py). ---")
+        print(f"--- Request processing complete (main.py). Returning reply: '{final_reply[:50]}...' ---")
         return final_response_object
 
-    except HTTPException as http_exc: # Re-raise FastAPI's own HTTPExceptions
+    except HTTPException as http_exc:
         print(f"!!! HTTP EXCEPTION CAUGHT directly in /chat: {http_exc.detail}")
-        raise http_exc
-    except Exception as e: # Catch any other unexpected errors
+        traceback.print_exc() # Log traceback for HTTPExceptions too
+        raise http_exc 
+    except Exception as e:
         error_type = type(e).__name__
         print(f"!!! UNHANDLED EXCEPTION in /chat endpoint (main.py) !!!")
         print(f"Exception Type: {error_type}")
-        print(f"Exception details: {e}")
-        traceback.print_exc() # Print full traceback to server logs
-        # Return a generic 500 error in the expected ChatResponse format
-        return ChatResponse(
-             reply=f"Sorry, a critical internal server error occurred ({error_type}). Please try again later.",
-             ui_data={"component_type": "generic_text", "data": {"error": f"A critical server error occurred: {error_type}"}}
-        )
+        print(f"Exception details: {str(e)}")
+        traceback.print_exc()
+        # Ensure a fallback reply in case of unexpected errors
+        error_reply = f"Sorry, a critical internal server error occurred ({error_type}). Please try a different sports/gaming query."
+        error_ui_data = {"component_type": "generic_text", "data": {"error": f"Server error: {error_type}"}}
+        return ChatResponse(reply=error_reply, ui_data=error_ui_data)
 
-print("--- app/main.py: BOTTOM OF FILE, APP DEFINED (Full Chat Logic Test) ---")
+print("--- app/main.py: BOTTOM OF FILE, APP DEFINED ---")

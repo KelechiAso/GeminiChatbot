@@ -34,7 +34,7 @@ print("--- openai_service.py: AsyncOpenAI client INITIALIZED ---")
 
 
 # --- Constants ---
-# System prompt for Step 0: V3.2 - Added Out-of-Scope Request handling
+# System prompt for Step 0: V3.2 - Refined request_type logic
 SYSTEM_PROMPT_EXTRACTOR_V3_2 = """
 Task: Analyze the **current user query** in the context of the **provided conversation history**. Extract structured sports information, classify the query, or provide a direct simple reply for acknowledgments/basic conversational turns/out-of-scope requests.
 
@@ -47,7 +47,7 @@ You will receive:
 
 1.  **Deeply Understand Context & History:**
     * Analyze `Conversation History` to understand the dialogue flow.
-    * Determine if the `Current User Query` is an acknowledgment (e.g., "okay", "thanks"), a simple greeting unrelated to a new complex query, related to sports/gaming, or clearly off-topic.
+    * Determine if the `Current User Query` is an acknowledgment, a simple greeting, related to sports/gaming, or clearly off-topic.
     * Resolve pronouns, fill in missing entities, and understand implicit references.
 
 2.  **Output JSON:** Based on your contextual understanding, output ONLY a **JSON** object:
@@ -78,13 +78,17 @@ You will receive:
 
     * **If the query (with context) is a sports or gaming-related query (and not a simple acknowledgment/greeting/out_of_scope)**:
         * "input_type": "sports_query"
-        * "sport_id": Numerical ID (Use mapping: {{1: Soccer, 18: Basketball, ...}}). `null` if unclear.
+        * "sport_id": Numerical ID (Use mapping: {{1: Soccer, 18: Basketball, 13: Tennis, 91: Volleyball, 78: Handball, 16: Baseball, 2: Horse Racing, 17: Ice Hockey, 12: American Football, 3: Cricket}}). **Crucially identify the sport if mentioned (e.g., "basketball", "NBA", "WNBA" implies sport_id 18).** Use `null` if truly unclear even with history.
         * "teams": Array of team names. Empty array ([]) if none.
-        * "request_type": String classification (e.g., "scores", "H2H Details", "player_profile", "live_score", "standings"). This can help guide tool selection.
+        * "request_type": String classification.
+            **- If the user asks for "games today", "schedule for today", "what games are on", "fixtures today", "upcoming matches for today", "top games today", "best games today", "important games today", or similar phrases implying a list of games for the current day, classify as "match_schedule".**
+            **- For general schedules not tied to a specific day but asking for a list of games (e.g., "upcoming basketball games"), also use "match_schedule".**
+            **- For requests about currently playing games, use "live_score".**
+            **- Other examples: ["scores", "H2H Details", "player_profile", "standings", "team_statistics", "suggestion", "percentage_request", "news"].**
         * "cc": Dictionary {{ "Team Name": "iso_code" }}. Empty object ({{}}) if none/unknown.
         * "original_query": The original current user input text.
         * "conversation": ""
-        * "contextual_query_interpretation": (Optional) Brief explanation of query interpretation.
+        * "contextual_query_interpretation": (Optional) Brief explanation of query interpretation (e.g., "User is asking for the basketball game schedule for today.").
 
     * **If the query is general chit-chat related to sports/gaming, sports trivia, or a conversational follow-up that might need more than a canned reply but doesn't fit sports/identity (and isn't a simple greeting/acknowledgment/out_of_scope)**:
         * "input_type": "conversational"
@@ -113,7 +117,7 @@ User Query Context: "{contextual_interpretation}"
 User Query: "{user_query}"
 """
 
-# --- All SCHEMA_DATA_... definitions (as provided previously) ---
+# --- All SCHEMA_DATA_... definitions ---
 SCHEMA_DATA_H2H = {
     "type": "object", "title": "H2HData", "description": "Data for head-to-head comparisons.",
     "properties": {
@@ -143,7 +147,7 @@ SCHEMA_DATA_MATCH_SCHEDULE_TABLE = {
 SCHEMA_DATA_TEAM_STATS = {
     "type": "object", "title": "TeamStatsData", "description": "Data for team (or general) statistics.",
     "properties": {"stats_type": {"type": "string"}, "title": {"type": "string"},
-                   "sections": {"type": "array", "items": {"type": "object", "properties": {"section_title": {"type": "string"}, "key_value_pairs": {"type": "object", "additionalProperties": {"type": ["string", "number", "boolean", "null"]}}}, "required": ["section_title", "key_value_pairs"]}}, # Allow boolean for stats like "Promoted: true"
+                   "sections": {"type": "array", "items": {"type": "object", "properties": {"section_title": {"type": "string"}, "key_value_pairs": {"type": "object", "additionalProperties": {"type": ["string", "number", "boolean", "null"]}}}, "required": ["section_title", "key_value_pairs"]}},
                    "narrative_summary": {"type": ["string", "null"]}},
     "required": ["stats_type", "title"]
 }
@@ -165,7 +169,7 @@ SCHEMA_DATA_SUGGESTION_CARD = {
 }
 SCHEMA_DATA_PERCENTAGE_CARD = {
     "type": "object", "title": "PercentageCardData", "description": "Data for displaying a specific percentage.",
-    "properties": {"title": {"type": "string"}, "value": {"type": "string", "pattern": "^(\\d{1,3}(\\.\\d+)?%|\\d+/\\d+)$"}, "context": {"type": "string"}, "basis": {"type": ["string", "null"]}, # Changed to allow null
+    "properties": {"title": {"type": "string"}, "value": {"type": "string", "pattern": "^(\\d{1,3}(\\.\\d+)?%|\\d+/\\d+)$"}, "context": {"type": "string"}, "basis": {"type": ["string", "null"]},
                    "supporting_stats": {"type": "object", "additionalProperties": {"type": ["string", "number"]}}},
     "required": ["title", "value", "context"]
 }
@@ -228,7 +232,7 @@ print("--- openai_service.py: All SCHEMA_DATA_... DEFINED ---")
 TOOLS_AVAILABLE = [
     {"type": "function", "function": {"name": "present_h2h_comparison", "description": "Presents a head-to-head comparison between two teams.", "parameters": SCHEMA_DATA_H2H}},
     {"type": "function", "function": {"name": "display_standings_table", "description": "Displays a league standings table.", "parameters": SCHEMA_DATA_STANDINGS_TABLE}},
-    {"type": "function", "function": {"name": "show_match_schedule", "description": "Shows a schedule of upcoming matches.", "parameters": SCHEMA_DATA_MATCH_SCHEDULE_TABLE}},
+    {"type": "function", "function": {"name": "show_match_schedule", "description": "Shows a schedule of upcoming matches (today, future) or top games for a specific day.", "parameters": SCHEMA_DATA_MATCH_SCHEDULE_TABLE}},
     {"type": "function", "function": {"name": "list_match_results", "description": "Lists recent match results.", "parameters": SCHEMA_DATA_RESULTS_LIST}},
     {"type": "function", "function": {"name": "provide_team_statistics", "description": "Provides statistics for a team or a general statistical overview.", "parameters": SCHEMA_DATA_TEAM_STATS}},
     {"type": "function", "function": {"name": "offer_suggestion", "description": "Offers a suggestion or prediction based on data (e.g., match outcome likelihood).", "parameters": SCHEMA_DATA_SUGGESTION_CARD}},
@@ -237,7 +241,7 @@ TOOLS_AVAILABLE = [
     {"type": "function", "function": {"name": "get_match_lineups", "description": "Provides starting lineups and substitutes for a match.", "parameters": SCHEMA_DATA_MATCH_LINEUPS}},
     {"type": "function", "function": {"name": "get_top_performers", "description": "Lists top performing players (e.g., scorers, assists) for a league/tournament.", "parameters": SCHEMA_DATA_TOP_PERFORMERS}},
     {"type": "function", "function": {"name": "get_player_profile", "description": "Retrieves detailed information about a sports player (bio, current team, basic stats).", "parameters": SCHEMA_DATA_PLAYER_PROFILE}},
-    {"type": "function", "function": {"name": "compare_players", "description": "Provides a side-by-side statistical comparison of two or more players.", "parameters": SCHEMA_DATA_PLAYER_COMPARISON}},
+    {"type": "function", "function": {"name": "compare_players", "description": "Provides a side-by-side statistical comparison of players.", "parameters": SCHEMA_DATA_PLAYER_COMPARISON}},
     {"type": "function", "function": {"name": "clarify_sports_term", "description": "Explains a specific sports term, rule, or concept.", "parameters": SCHEMA_DATA_SPORTS_TERM_EXPLANATION}},
     {"type": "function", "function": {"name": "get_team_news", "description": "Fetches latest news articles related to a specific sports team.", "parameters": SCHEMA_DATA_TEAM_NEWS}},
     {"type": "function", "function": {"name": "get_league_news", "description": "Fetches latest news articles related to a specific sports league.", "parameters": SCHEMA_DATA_LEAGUE_NEWS}},
@@ -273,14 +277,13 @@ print("--- openai_service.py: safeText function DEFINED ---")
 async def extract_sports_info(user_query: str, conversation_history: List[Dict[str, str]]) -> Dict[str, Any]:
     print(f"--- openai_service.py: extract_sports_info CALLED with query: '{user_query[:50]}...' ---")
     if not user_query: return {"input_type": "invalid_request", "conversation": "", "original_query": ""}
-    fallback_error = {"input_type": "error", "message": "Extraction failed", "original_query": user_query}
+    fallback_error = {"input_type": "error", "message": "Extraction failed during initial processing.", "original_query": user_query}
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT_EXTRACTOR_V3_2}]
-    history_to_include = conversation_history[-4:]
+    history_to_include = conversation_history[-4:] # Use last 4 turns for context
     for turn in history_to_include:
-        content = turn.get("content", "") # Default to empty string if content is None
-        if not isinstance(content, str):
-            content = str(content)
+        content = turn.get("content", "") 
+        if not isinstance(content, str): content = str(content)
         messages.append({"role": turn["role"], "content": content})
     messages.append({"role": "user", "content": user_query})
 
@@ -290,111 +293,123 @@ async def extract_sports_info(user_query: str, conversation_history: List[Dict[s
             model="gpt-3.5-turbo-0125",
             messages=messages,
             response_format={"type": "json_object"},
-            temperature=0.2
+            temperature=0.1 # Lower temperature for more deterministic classification
         )
         extracted_data = json.loads(response.choices[0].message.content)
         
-        extracted_data["original_query"] = extracted_data.get("original_query", user_query) # Ensure original_query
+        extracted_data["original_query"] = extracted_data.get("original_query", user_query)
         extracted_data["input_type"] = extracted_data.get("input_type", "unknown")
         
-        direct_reply_types = ["acknowledgment", "simple_greeting", "invalid_request", "out_of_scope_request"]
-        if extracted_data["input_type"] in direct_reply_types:
+        # Ensure 'conversation' field is appropriately set or defaulted for types that might be short-circuited
+        direct_reply_types_with_predefined_conv = ["acknowledgment", "simple_greeting", "invalid_request", "out_of_scope_request"]
+        types_needing_empty_conv_for_step2 = ["identity_query", "sports_query", "conversational"]
+
+        if extracted_data["input_type"] in direct_reply_types_with_predefined_conv:
             if "conversation" not in extracted_data or not extracted_data.get("conversation","").strip():
+                # The prompt SYSTEM_PROMPT_EXTRACTOR_V3_2 should already provide these. This is a fallback.
                 default_conversations = {
-                    "simple_greeting": "Hello! I'm GameNerd. How can I help with sports or gaming info?",
-                    "invalid_request": "I'm not sure how to help with that sports query. Could you rephrase?",
-                    "out_of_scope_request": "I specialize in sports and gaming information and cannot assist with that topic.",
+                    "simple_greeting": "Hello! I'm GameNerd, your sports and gaming information assistant. How can I help you today?",
+                    "invalid_request": "I'm not sure how to help with that sports or gaming query. Could you please rephrase or provide more details?",
+                    "out_of_scope_request": "I am GameNerd, an AI assistant focused on sports and gaming information. I'm unable to assist with requests outside of this domain.",
                     "acknowledgment": "Okay."
                 }
-                extracted_data["conversation"] = default_conversations.get(extracted_data["input_type"], "I'm processing that.")
-        elif "conversation" not in extracted_data : # For types like identity_query, sports_query, conversational
-             extracted_data["conversation"] = ""
-
+                extracted_data["conversation"] = default_conversations.get(extracted_data["input_type"], "Processing your request.")
+        elif extracted_data["input_type"] in types_needing_empty_conv_for_step2:
+             extracted_data["conversation"] = "" # Ensure it's empty if Step 2 needs to generate it
 
         print(f"Extracted data from Step 0: {json.dumps(extracted_data, indent=2)}")
         return extracted_data
     except json.JSONDecodeError as json_err:
-        print(f"JSON decoding error during extraction: {json_err}")
-        raw_output = "Error fetching raw output"
-        if 'response' in locals() and hasattr(response, 'choices') and response.choices:
-             raw_output = response.choices[0].message.content
-        print(f"Raw LLM output (extraction): {raw_output}")
-        fallback_error["message"] = "Failed to parse extraction response from AI."
+        print(f"!!! JSON decoding error during extraction: {json_err}")
+        raw_output_content = "Error fetching raw output for JSONDecodeError"
+        try: # Try to get the raw response if possible
+            if 'response' in locals() and response.choices and response.choices[0].message:
+                raw_output_content = response.choices[0].message.content
+        except Exception: pass
+        print(f"Raw LLM output (extraction attempt): {raw_output_content}")
+        fallback_error["message"] = "Failed to parse AI's initial analysis."
         return fallback_error
     except openai.APIError as api_err:
         print(f"!!! OPENAI API ERROR during extraction !!! Error details: {api_err}")
-        fallback_error["message"] = f"OpenAI API Error: {str(api_err)}"
+        fallback_error["message"] = f"OpenAI API Error during extraction: {str(api_err)}"
         return fallback_error
     except Exception as e:
-        print(f"An error occurred during extraction: {e}")
+        print(f"!!! An error occurred during extraction: {e}")
         traceback.print_exc()
         fallback_error["message"] = f"Unexpected error during query extraction: {str(e)}"
         return fallback_error
 
 async def fetch_raw_text_data(user_query: str, parsed_data: Optional[Dict[str, Any]], conversation_history: List[Dict[str, str]]) -> str:
-    print(f"--- openai_service.py: fetch_raw_text_data CALLED ---")
+    print(f"--- openai_service.py: fetch_raw_text_data CALLED for input_type: {parsed_data.get('input_type')} ---")
     input_type = parsed_data.get("input_type") if parsed_data else "unknown"
     
     no_fetch_types = ["simple_greeting", "acknowledgment", "invalid_request", "identity_query", "out_of_scope_request"]
-    request_type = parsed_data.get("request_type") if parsed_data else None
+    request_type_from_step0 = parsed_data.get("request_type") if parsed_data else None
 
     if input_type in no_fetch_types:
          print(f">>> Skipping raw text data fetch: Input type '{input_type}' does not require fetching.")
          return "--NO DATA FETCHED (Input Type Not Requiring Fetch)--"
     
-    # Refined fetch logic
     requires_fetch = False
     if input_type == "sports_query":
         requires_fetch = True
-    elif input_type == "conversational" and "trivia" in parsed_data.get("contextual_query_interpretation","").lower():
+    elif input_type == "conversational" and "trivia" in parsed_data.get("contextual_query_interpretation","").lower(): # Fetch for trivia
         requires_fetch = True
-    elif request_type in ["suggestion", "percentage_request", "scores", "H2H Details", "lineups", "standings", "match_schedule", "results", "statistics", "player_profile", "live_score", "top_scorers", "team_news", "league_news"]: # Explicit request types needing data
+    # Explicit request_types that inherently need data, even if input_type was classified broadly as 'conversational' by mistake
+    data_needing_request_types = [
+        "scores", "H2H Details", "player_profile", "live_score", "standings", 
+        "team_statistics", "suggestion", "percentage_request", "news", "match_schedule",
+        "top_performers", "match_lineups", "compare_players" # Added new ones
+    ]
+    if request_type_from_step0 in data_needing_request_types:
         requires_fetch = True
 
     if not requires_fetch:
-        print(f">>> Skipping raw text data fetch: Input type '{input_type}' (request: {request_type}) not marked for direct fetching.")
-        return "--NO DATA FETCHED (Input Type Not Prioritized For Fetch)--"
+        print(f">>> Skipping raw text data fetch: Input type '{input_type}' and request type '{request_type_from_step0}' do not necessitate fetching.")
+        return "--NO DATA FETCHED (Logic determined no fetch needed)--"
 
-    if not parsed_data: # Should be caught by requires_fetch logic but as a safeguard
-        print(">>> Skipping raw text data fetch: Parsed data is missing.")
-        return "--NO DATA FETCHED (Missing Parsed Data)--"
+    if not parsed_data: # Should be caught by requires_fetch logic if it depends on parsed_data, but as a safeguard
+        print(">>> Skipping raw text data fetch: Parsed data is missing (should not happen if fetch is required).")
+        return "--NO DATA FETCHED (Missing Parsed Data Unexpectedly)--"
 
     query_for_fetch = parsed_data.get("original_query", user_query)
     contextual_interpretation = parsed_data.get("contextual_query_interpretation", "")
     
     effective_query_for_fetch = query_for_fetch
-    if contextual_interpretation and "User asked:" not in contextual_interpretation and contextual_interpretation.strip():
-        if len(contextual_interpretation) > len(query_for_fetch) + 5 or not query_for_fetch.lower().startswith(contextual_interpretation.lower()[:len(query_for_fetch)-5]): # Avoid simple prefix repetition
+    if contextual_interpretation and contextual_interpretation.strip() and "User asked:" not in contextual_interpretation :
+        # More robust check to avoid simple prefix repetition
+        if len(contextual_interpretation) > 5 and not effective_query_for_fetch.lower().startswith(contextual_interpretation.lower()[:len(effective_query_for_fetch)-10]):
              effective_query_for_fetch = f"Context from prior analysis: {contextual_interpretation}\nUser's current query: {query_for_fetch}"
     
     try:
         prompt = FETCH_INFO_PROMPT_TEMPLATE.format(
             user_query=query_for_fetch, 
-            contextual_interpretation=contextual_interpretation
+            contextual_interpretation=contextual_interpretation if contextual_interpretation.strip() else "No specific prior context."
         )
     except Exception as fmt_e:
          print(f"!!! UNEXPECTED ERROR during data fetch prompt formatting !!! Error: {fmt_e}")
          return f"--PROMPT FORMATTING ERROR: {fmt_e}--"
 
     messages_for_fetch = [{"role": "system", "content": prompt}]
-    # Consider if history is needed if contextual_interpretation is good. For now, keeping it minimal.
-    # history_for_fetch = conversation_history[-2:] 
-    # for turn in history_for_fetch: ...
 
     try:
         print(f">>> Attempting Search LLM call for raw text data. Effective Query: {effective_query_for_fetch[:150]}...")
         response = await client.chat.completions.create(
-            model="gpt-4o-search-preview", # Or your preferred data gathering model
+            model="gpt-4o-search-preview", 
             messages=messages_for_fetch,
-            #temperature=0.3 
+            #temperature=0.2 # Factual retrieval
         )
         raw_data_string = response.choices[0].message.content.strip()
         print(f">>> Raw Text Data Received (first 300 chars):\n----------\n{raw_data_string[:300]}...\n----------")
+        
+        # Check for more nuanced non-committal fetch responses
+        non_committal_phrases = [
+            "sorry", "don't have specific information", "cannot provide", "unable to find",
+            "No specific sports/gaming data fetching is required", "cannot assist with that topic"
+        ]
         if not raw_data_string or \
-           (len(raw_data_string) < 70 and ("sorry" in raw_data_string.lower() or \
-                                            "don't have specific information" in raw_data_string.lower() or \
-                                            "No specific sports/gaming data fetching is required" in raw_data_string or \
-                                            "cannot assist with that topic" in raw_data_string.lower())):
+           (len(raw_data_string) < 100 and any(phrase in raw_data_string.lower() for phrase in non_committal_phrases)):
+            print(f">>> Fetch seemed non-committal or empty: {raw_data_string}")
             return f"--FETCH FAILED OR REFUSED: {raw_data_string}--"
         return raw_data_string
     except openai.APIError as api_err:
@@ -414,64 +429,72 @@ async def get_structured_data_and_reply_via_tools(
     original_query = parsed_data.get("original_query", "N/A")
     contextual_interpretation = parsed_data.get("contextual_query_interpretation", "No specific interpretation from Step 0.")
     input_type_step0 = parsed_data.get("input_type", "unknown")
-    request_type_step0 = parsed_data.get("request_type", "N/A")
+    request_type_step0 = parsed_data.get("request_type", "N/A") # This is key for guiding tool selection
 
     tool_system_prompt = """
-    You are GameNerd (Select Punters AI bot), a specialized AI assistant designed to provide **sports and gaming-related** data, statistics, and insights.
-    Your knowledge and capabilities are strictly limited to these domains (sports, e-sports, relevant betting statistics based on historical data or public odds IF specifically asked for analysis).
+    You are GameNerd, a specialized AI assistant for **sports and gaming information ONLY**.
+    Your primary goal is to understand the user's sports/gaming query, use relevant information, and then select the MOST appropriate tool to structure and present the data.
     
-    CRITICALLY IMPORTANT: Your textual reply to the user ('final_reply') MUST NOT contain any markdown links (e.g., `[text](URL)`), full URLs, or hyperlinks. If you need to mention a source or an entity, refer to it by its name ONLY. Do not attempt to make text clickable or suggest searching elsewhere.
+    CRITICALLY IMPORTANT: Your textual reply MUST NOT contain any markdown links (e.g., `[text](URL)`), full URLs, or hyperlinks. If you need to mention a source or entity, refer to it by its name ONLY.
 
-    Analyze the user's query and context.
-    1. If the query is clearly outside your sports/gaming domain (e.g., math help, medical advice), politely state your specialization: "I am GameNerd, an AI assistant focused on sports and gaming information. I'm unable to assist with requests outside of this domain." Do NOT attempt to answer it or use tools.
+    Process:
+    1. If the query is clearly outside your sports/gaming domain (based on context passed), politely state: "I am GameNerd, an AI assistant focused on sports and gaming information. I'm unable to assist with requests outside of this domain." Do NOT use tools or attempt to answer.
     2. If the query is within your sports/gaming domain:
-        a. Select the MOST appropriate tool from the available list to structure and present the data if applicable. Your selection should be based on the user's specific intent.
-        b. Formulate a concise, user-facing textual reply. If you use a tool, this reply should briefly introduce or summarize the data presented by the tool.
-        c. If no specific tool is suitable for structuring data, but the query is a valid sports/gaming conversational topic or trivia, provide a direct textual reply.
-    Your entire response must be a textual reply. If you decide to use a tool, the system will handle the tool call separately based on your structured argument output.
-    When providing arguments for a tool, ensure all required fields for that tool's schema are present and correctly formatted.
+        a. Based on the 'Detected Request Type' and 'Information Gathered', decide if a tool is best.
+        b. If a tool is appropriate (e.g., 'match_schedule', 'standings_table', 'player_profile'), call it with accurately extracted arguments from the 'Information Gathered' or query.
+        c. Formulate a concise, user-facing textual reply. If you use a tool, this reply should briefly introduce or summarize the data.
+        d. If no tool is suitable but it's a valid sports/gaming conversational topic or trivia, provide a direct textual reply.
+    Ensure all required fields for a chosen tool's parameters are populated. If crucial information for a tool is missing from the gathered text, do not call the tool; instead, provide a text reply explaining what information you found or what's missing.
     """
     
     messages = [{"role": "system", "content": tool_system_prompt}]
-    for turn in conversation_history[-3:]: # Use a bit more history for context
-        messages.append({"role": turn["role"], "content": turn.get("content","")})
+    
+    # Add some conversation history for context
+    for turn in conversation_history[-3:]: # Last 3 turns
+        messages.append({"role": turn["role"], "content": turn.get("content","")}) # Add default for content
 
     user_context_for_tool_call = f"""
     User Query: {original_query}
-    Initial Analysis (from Step 0): Input Type='{input_type_step0}', Request Type='{request_type_step0}', Interpretation='{contextual_interpretation}'
+    Initial Analysis (from Step 0):
+      Input Type: '{input_type_step0}'
+      Sport ID: '{parsed_data.get("sport_id", "Not specified")}' 
+      Detected Request Type: '{request_type_step0}'
+      Contextual Interpretation: '{contextual_interpretation}'
+    
     Information Gathered (from Step 1, if any):
     ```text
-    {raw_text_data if raw_text_data and not raw_text_data.startswith("--") else "No specific data was fetched or applicable."}
+    {raw_text_data if raw_text_data and not raw_text_data.startswith("--") else "No specific data was fetched, or the query was not data-oriented (e.g., conversational, identity)."}
     ```
-    Based on all this, provide a textual reply. If a tool is appropriate for structuring data related to this sports/gaming query, call that tool with the necessary arguments. Remember, NO LINKS in your textual reply.
-    If the query was 'who are you?' or similar (identity_query), introduce yourself as GameNerd.
+    Proceed according to your role and instructions. If 'Detected Request Type' is 'match_schedule', prioritize using the 'show_match_schedule' tool. If 'standings', use 'display_standings_table', etc. If 'identity_query', introduce yourself as GameNerd. Remember: NO LINKS in your textual reply.
     """
     messages.append({"role": "user", "content": user_context_for_tool_call})
 
-    final_reply = "I'm sorry, I encountered an issue processing that sports/gaming request."
-    ui_data = {"component_type": "generic_text", "data": {"message": "Could not generate specific UI data."}}
+    # Default response if things go wrong before LLM call or if LLM fails to respond
+    final_reply = "I'm having a bit of trouble with that sports/gaming request. Could you try rephrasing?"
+    ui_data = {"component_type": "generic_text", "data": {"message": "Could not generate specific UI data for this request."}}
 
-    if input_type_step0 == "out_of_scope_request": # Should have been short-circuited, but as a safeguard
+    if input_type_step0 == "out_of_scope_request": # This check is important
         return {
             "reply": parsed_data.get("conversation", "I specialize in sports and gaming information and cannot assist with that topic."),
             "ui_data": {"component_type": "generic_text", "data": {"message": "Request outside of sports/gaming domain."}}
         }
 
     try:
-        print(f">>> Attempting LLM call with Tools (Model: gpt-4o). Input Type from Step 0: {input_type_step0}")
+        print(f">>> Attempting LLM call with Tools (Model: gpt-4o). Input Type: {input_type_step0}, Request Type: {request_type_step0}")
         response = await client.chat.completions.create(
             model="gpt-4o", 
             messages=messages,
             tools=TOOLS_AVAILABLE,
             tool_choice="auto", 
-            temperature=0.2 # Lower temperature for more deterministic tool use and factual replies
+            temperature=0.1 # Very low temperature for precise tool use and factual replies
         )
 
         response_message = response.choices[0].message
         tool_calls = response_message.tool_calls
 
-        if response_message.content:
+        if response_message.content: # LLM provided a direct textual reply
             final_reply = response_message.content
+            print(f">>> LLM provided direct reply content: \"{final_reply[:150]}...\"")
         
         if tool_calls:
             print(f">>> Tool calls received: {len(tool_calls)}. Processing the first one.")
@@ -487,54 +510,52 @@ async def get_structured_data_and_reply_via_tools(
                 ui_data["component_type"] = TOOL_NAME_TO_COMPONENT_TYPE.get(function_name, function_name)
                 ui_data["data"] = function_args 
 
-                if not response_message.content and ui_data["component_type"] != "generic_text": # If LLM didn't give a reply with tool use
+                if not response_message.content and ui_data["component_type"] != "generic_text": 
                     component_name_readable = ui_data['component_type'].replace('_', ' ').title()
-                    final_reply = f"Certainly! Here's the {component_name_readable} you asked for:"
-                elif not response_message.content:
+                    final_reply = f"Certainly! Here is the {component_name_readable} information:"
+                elif not response_message.content: # No tool and no direct reply, but not an error
                      final_reply = "I've processed that for you."
                 print(f"  Successfully parsed arguments for tool {function_name}.")
 
             except json.JSONDecodeError as json_decode_err:
                 print(f"!!! ERROR: Failed to parse tool arguments JSON for {function_name}: {json_decode_err}")
-                print(f"  Faulty JSON string was: {function_args_json}")
-                current_reply_prefix = final_reply if response_message.content else "I found the information, but "
-                final_reply = current_reply_prefix + "there was an issue structuring it correctly."
-                ui_data = {"component_type": "generic_text", "data": {"error": "Failed to parse AI's structured data.", "tool_name": function_name}}
+                print(f"  Faulty JSON string from LLM: {function_args_json}")
+                # Use the existing final_reply if LLM gave one, otherwise set error message
+                final_reply = final_reply if response_message.content else "I found information, but had an issue structuring it for display."
+                ui_data = {"component_type": "generic_text", "data": {"error": f"AI failed to structure data for {function_name}.", "raw_args": function_args_json}}
         
         elif not response_message.content: # No tool call and no direct reply from LLM
-            print("!!! LLM made no tool call and provided no direct reply content.")
+            print("!!! LLM made no tool call and provided no direct textual reply content.")
             if input_type_step0 == "identity_query":
-                final_reply = "I am GameNerd, your sports and gaming AI assistant, ready to help with scores, stats, and more!"
-            elif raw_text_data.startswith("--FETCH FAILED") or (raw_text_data.startswith("--NO DATA") and input_type_step0 == "sports_query"):
-                final_reply = "I couldn't retrieve the specific sports information for your query at this moment."
-            else:
-                final_reply = "I've processed your sports/gaming query. How else can I assist?"
+                final_reply = "I am GameNerd, your AI assistant for sports and gaming! Ask me about scores, stats, schedules, and more."
+            elif raw_text_data and (raw_text_data.startswith("--FETCH FAILED") or raw_text_data.startswith("--NO DATA")):
+                final_reply = "I couldn't retrieve specific information for your sports/gaming query right now."
+            else: # General fallback if everything else failed to produce a reply
+                final_reply = "I've processed your sports/gaming query. What else can I help you with?"
         
-        # Final link stripping as a safeguard
+        # Final link stripping safeguard (though prompt should handle it)
         if final_reply and re.search(r"\[.*?\]\(http[s]?://.*?\)|http[s]?://\S+", final_reply):
-            print(f"!!! WARNING: Final reply from LLM contained links. Original: '{final_reply[:100]}...' Attempting to strip.")
-            stripped_reply = re.sub(r"\[(.*?)\]\(http[s]?://.*?\)", r"\1 (link removed)", final_reply) # Keep text, remove link
+            print(f"!!! WARNING: Final reply still contained links. Original: '{final_reply[:100]}...' Stripping.")
+            stripped_reply = re.sub(r"\[(.*?)\]\(http[s]?://.*?\)", r"\1 (link removed)", final_reply)
             stripped_reply = re.sub(r"http[s]?://\S+", "https://www.youtube.com/watch?v=lOeQUwdAjE0&pp=0gcJCdgAo7VqN5tD", stripped_reply)
-            if stripped_reply != final_reply:
-                final_reply = stripped_reply + " (Note: Links were removed as they are not supported)."
-            else: # If regex didn't change anything but links are present
-                final_reply = "I have the information you requested. (Links cannot be displayed)"
+            if stripped_reply != final_reply: # Only append note if changes were made
+                final_reply = stripped_reply + " (Note: Links are not displayed)."
 
 
         return {"reply": final_reply, "ui_data": ui_data}
 
     except openai.APIError as api_err:
-        print(f"!!! OPENAI API ERROR with Tool Calling !!! Error Details: {api_err}")
-        error_message = f"There was an API issue when trying to get that sports information ({api_err.code}). Please try again."
-        if "invalid_api_key" in str(api_err).lower() or "incorrect_api_key" in str(api_err).lower() :
-            error_message = "There seems to be an issue with the API configuration. Please contact support."
+        print(f"!!! OPENAI API ERROR during Tool Calling step !!! Error Details: {api_err}")
+        error_message = f"An API issue occurred ({api_err.code}) while getting sports/gaming details. Please try later."
+        if hasattr(api_err, 'message') and ("invalid_api_key" in api_err.message.lower() or "incorrect_api_key" in api_err.message.lower()):
+            error_message = "There seems to be an issue with the API configuration. Please notify support."
         return {"reply": error_message, 
                 "ui_data": {"component_type": "generic_text", "data": {"error": f"OpenAI API Error: {str(api_err)}"}}}
     except Exception as e:
         print(f"!!! UNEXPECTED EXCEPTION during Tool Calling or final processing !!! Type: {type(e)}, Details: {e}")
         traceback.print_exc()
-        return {"reply": "I encountered an unexpected internal issue with your sports/gaming request. Please try again later.", 
-                "ui_data": {"component_type": "generic_text", "data": {"error": f"Unexpected error: {str(e)}"}}}
+        return {"reply": "An unexpected internal issue occurred with your sports/gaming request. Please try again.", 
+                "ui_data": {"component_type": "generic_text", "data": {"error": f"Unexpected server error: {str(e)}"}}}
 
 print("--- openai_service.py: All async functions DEFINED ---")
 print("--- openai_service.py: BOTTOM OF FILE ---")

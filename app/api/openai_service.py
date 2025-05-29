@@ -54,7 +54,7 @@ You will receive:
 
     * **If the query is clearly unrelated to sports, gaming, betting statistics, or your capabilities as a sports AI (e.g., asking for math help, general knowledge unrelated to sports, personal advice, medical questions)**:
         * "input_type": "out_of_scope_request"
-        * "conversation": "I am SPAI, an AI assistant focused on sports and gaming information. I can provide insights on scores, statistics, H2H details, and related topics. I'm unable to assist with requests outside of this domain."
+        * "conversation": "I am GameNerd, an AI assistant focused on sports and gaming information. I can provide insights on scores, statistics, H2H details, and related topics. I'm unable to assist with requests outside of this domain."
         * "original_query": The original current user input text.
         * "contextual_query_interpretation": "User query is outside of the AI's defined scope (sports and gaming)."
 
@@ -66,7 +66,7 @@ You will receive:
 
     * **If the query is a simple greeting (e.g., "hi", "hello") AND the conversation is just starting or history shows no active complex topic**:
         * "input_type": "simple_greeting"
-        * "conversation": "Hello! I'm SPAI, your sports and gaming information assistant. How can I help you today?"
+        * "conversation": "Hello! I'm GameNerd, your sports and gaming information assistant. How can I help you today?"
         * "original_query": The original current user input text.
         * "contextual_query_interpretation": "Simple user greeting."
 
@@ -301,7 +301,7 @@ async def extract_sports_info(user_query: str, conversation_history: List[Dict[s
         if extracted_data["input_type"] in direct_reply_types:
             if "conversation" not in extracted_data or not extracted_data.get("conversation","").strip():
                 default_conversations = {
-                    "simple_greeting": "Hello! I'm SPAI. How can I help with sports or gaming info?",
+                    "simple_greeting": "Hello! I'm GameNerd. How can I help with sports or gaming info?",
                     "invalid_request": "I'm not sure how to help with that sports query. Could you rephrase?",
                     "out_of_scope_request": "I specialize in sports and gaming information and cannot assist with that topic.",
                     "acknowledgment": "Okay."
@@ -417,13 +417,13 @@ async def get_structured_data_and_reply_via_tools(
     request_type_step0 = parsed_data.get("request_type", "N/A")
 
     tool_system_prompt = """
-    You are SPAI (Select Punters AI bot), a specialized AI assistant designed to provide **sports and gaming-related** data, statistics, and insights.
+    You are GameNerd (Select Punters AI bot), a specialized AI assistant designed to provide **sports and gaming-related** data, statistics, and insights.
     Your knowledge and capabilities are strictly limited to these domains (sports, e-sports, relevant betting statistics based on historical data or public odds IF specifically asked for analysis).
     
     CRITICALLY IMPORTANT: Your textual reply to the user ('final_reply') MUST NOT contain any markdown links (e.g., `[text](URL)`), full URLs, or hyperlinks. If you need to mention a source or an entity, refer to it by its name ONLY. Do not attempt to make text clickable or suggest searching elsewhere.
 
     Analyze the user's query and context.
-    1. If the query is clearly outside your sports/gaming domain (e.g., math help, medical advice), politely state your specialization: "I am SPAI, an AI assistant focused on sports and gaming information. I'm unable to assist with requests outside of this domain." Do NOT attempt to answer it or use tools.
+    1. If the query is clearly outside your sports/gaming domain (e.g., math help, medical advice), politely state your specialization: "I am GameNerd, an AI assistant focused on sports and gaming information. I'm unable to assist with requests outside of this domain." Do NOT attempt to answer it or use tools.
     2. If the query is within your sports/gaming domain:
         a. Select the MOST appropriate tool from the available list to structure and present the data if applicable. Your selection should be based on the user's specific intent.
         b. Formulate a concise, user-facing textual reply. If you use a tool, this reply should briefly introduce or summarize the data presented by the tool.
@@ -444,7 +444,7 @@ async def get_structured_data_and_reply_via_tools(
     {raw_text_data if raw_text_data and not raw_text_data.startswith("--") else "No specific data was fetched or applicable."}
     ```
     Based on all this, provide a textual reply. If a tool is appropriate for structuring data related to this sports/gaming query, call that tool with the necessary arguments. Remember, NO LINKS in your textual reply.
-    If the query was 'who are you?' or similar (identity_query), introduce yourself as SPAI.
+    If the query was 'who are you?' or similar (identity_query), introduce yourself as GameNerd.
     """
     messages.append({"role": "user", "content": user_context_for_tool_call})
 
@@ -504,7 +504,7 @@ async def get_structured_data_and_reply_via_tools(
         elif not response_message.content: # No tool call and no direct reply from LLM
             print("!!! LLM made no tool call and provided no direct reply content.")
             if input_type_step0 == "identity_query":
-                final_reply = "I am SPAI, your sports and gaming AI assistant, ready to help with scores, stats, and more!"
+                final_reply = "I am GameNerd, your sports and gaming AI assistant, ready to help with scores, stats, and more!"
             elif raw_text_data.startswith("--FETCH FAILED") or (raw_text_data.startswith("--NO DATA") and input_type_step0 == "sports_query"):
                 final_reply = "I couldn't retrieve the specific sports information for your query at this moment."
             else:

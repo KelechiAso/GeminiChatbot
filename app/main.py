@@ -1,182 +1,117 @@
-# /app/api/gemini_service.py
+# /app/main.py
 
+print("--- app/main.py: TOP OF FILE ---")
+from fastapi.responses import StreamingResponse
+from typing import List, Dict, Any, Optional, AsyncGenerator
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import os
 import json
 import traceback
-import google.generativeai as genai
-from typing import Dict, List, Any, Tuple
+import pprint
 
-# --- MODIFICATION: Import ONLY the Type object ---
-from google.generativeai.protos import Type
+print("--- app/main.py: Standard imports DONE ---")
 
-# --- Setup ---
-print("--- gemini_service.py: TOP OF FILE ---")
+# This try/except block now works because gemini_service.py is fixed.
 try:
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise ValueError("CRITICAL: GOOGLE_API_KEY environment variable not set.")
-    
-    genai.configure(api_key=api_key)
-    print("--- gemini_service.py: Google AI SDK Configured ---")
-
+    print("--- app/main.py: Attempting to import from api.gemini_service ---")
+    from .api.gemini_service import generate_gemini_response
+    print("--- app/main.py: SUCCESSFULLY IMPORTED from api.gemini_service ---")
+except ImportError as e:
+    print(f"--- app/main.py: !!! FAILED to import from api.gemini_service due to ImportError: {e} !!! ---")
+    traceback.print_exc()
+    raise e
 except Exception as e:
-    print(f"--- gemini_service.py: !!! FAILED to configure Google AI SDK: {e} !!! ---")
+    print(f"--- app/main.py: !!! FAILED to import from api.gemini_service due to OTHER error: {e} !!! ---")
     traceback.print_exc()
     raise e
 
-# --- System Prompt (Unchanged) ---
-SYSTEM_PROMPT = """
-You are GameNerd, a specialized AI assistant for sports and gaming information ONLY.
-Your personality is helpful, concise, and friendly.
-Your goal is to use the provided tools to generate structured UI components for sports data requests.
-"""
 
-# --- MODIFICATION: Schemas are now DICTIONARIES that use the `Type` enum for values ---
-# This is the correct format the Google SDK expects.
-
-SCHEMA_DATA_H2H = {
-    "type": Type.OBJECT,
-    "properties": {
-        'h2h_summary': {
-            "type": Type.OBJECT,
-            "properties": {
-                'team1': {
-                    "type": Type.OBJECT,
-                    "properties": {
-                        'name': {"type": Type.STRING},
-                        'wins': {"type": Type.INTEGER},
-                        'draws': {"type": Type.INTEGER},
-                        'losses': {"type": Type.INTEGER},
-                        'goals_for': {"type": Type.INTEGER},
-                        'goals_against': {"type": Type.INTEGER}
-                    }
-                },
-                'team2': {
-                    "type": Type.OBJECT,
-                    "properties": {
-                        'name': {"type": Type.STRING},
-                        'wins': {"type": Type.INTEGER},
-                        'draws': {"type": Type.INTEGER},
-                        'losses': {"type": Type.INTEGER},
-                        'goals_for': {"type": Type.INTEGER},
-                        'goals_against': {"type": Type.INTEGER}
-                    }
-                },
-                'total_matches': {"type": Type.INTEGER}
-            }
-        },
-        'recent_meetings': {
-            "type": Type.ARRAY,
-            "items": {
-                "type": Type.OBJECT,
-                "properties": {
-                    'date': {"type": Type.STRING},
-                    'score': {"type": Type.STRING},
-                    'competition': {"type": Type.STRING}
-                }
-            }
-        }
-    },
-    "required": ['h2h_summary']
-}
-
-SCHEMA_DATA_MATCH_SCHEDULE_TABLE = {
-    "type": Type.OBJECT,
-    "properties": {
-        'title': {"type": Type.STRING},
-        'headers': {"type": Type.ARRAY, "items": {"type": Type.STRING}},
-        'rows': {"type": Type.ARRAY, "items": {"type": Type.ARRAY, "items": {"type": Type.STRING}}},
-        'sort_info': {"type": Type.STRING}
-    },
-    "required": ['headers', 'rows']
-}
-
-# (If you have other schemas, they must all be converted to this dictionary format using the `Type` enum)
-
-# --- Tool Name Mapping (Unchanged) ---
-TOOL_NAME_TO_COMPONENT_TYPE = {
-    "present_h2h_comparison": "h2h_comparison_table",
-    "show_match_schedule": "match_schedule_table",
-}
-
-# --- Gemini Model and Tool Configuration (Unchanged) ---
-tools_for_gemini = [
-    genai.protos.Tool(
-        function_declarations=[
-            genai.protos.FunctionDeclaration(name='present_h2h_comparison', description="Presents a head-to-head comparison between two teams.", parameters=SCHEMA_DATA_H2H),
-            genai.protos.FunctionDeclaration(name='show_match_schedule', description="Shows a schedule of upcoming matches.", parameters=SCHEMA_DATA_MATCH_SCHEDULE_TABLE),
-        ]
-    )
-]
-
-model = genai.GenerativeModel(
-    model_name='gemini-1.5-flash-latest',
-    system_instruction=SYSTEM_PROMPT,
-    tools=tools_for_gemini
+app = FastAPI(
+    title="Sports Chatbot Microservice (SPAI) - v3.0 (Gemini)",
+    description="Provides fast, context-aware sports and gaming info using Google Gemini."
 )
-print("--- gemini_service.py: Gemini Model INITIALIZED (gemini-1.5-flash-latest) ---")
+print("--- app/main.py: FastAPI INSTANCE CREATED ---")
 
+# --- CORS ---
+origins = ["*",]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+print("--- app/main.py: CORS Middleware ADDED ---")
 
-# --- Main Service Function (Unchanged) ---
-async def generate_gemini_response(
-    user_query: str,
-    conversation_history: List[Dict[str, str]]
-) -> Tuple[str, Dict[str, Any]]:
-    print(f"--- gemini_service.py: Generating response for query: '{user_query[:50]}...' ---")
-    
-    final_reply = "Sorry, I couldn't process that. Please try again."
-    final_ui_data = {"component_type": "generic_text", "data": {}}
+# --- API Models ---
+class ChatRequest(BaseModel):
+    user_id: str = "default_user"
+    query: str
+
+class ChatResponse(BaseModel):
+    reply: str
+    ui_data: Dict[str, Any]
+print("--- app/main.py: Pydantic Models DEFINED ---")
+
+# --- In-Memory History Store ---
+conversation_histories: Dict[str, List[Dict[str, str]]] = {}
+HISTORY_LIMIT = 12
+print("--- app/main.py: Conversation History Store INITIALIZED ---")
+
+# --- Static File and Health Check Endpoints ---
+@app.get("/", response_class=FileResponse)
+async def read_index():
+    print("--- app/main.py: / endpoint CALLED ---")
+    html_file_path = "app/static/htmlsim.html"
+    if not os.path.exists(html_file_path):
+        raise HTTPException(status_code=404, detail="Index HTML not found.")
+    return FileResponse(html_file_path)
+
+@app.get("/health")
+async def health_check():
+    print("--- app/main.py: /health endpoint CALLED ---")
+    return {"status": "ok_v3.0_gemini"}
+
+# --- Main Chat Endpoint ---
+@app.post("/chat", response_model=ChatResponse)
+async def handle_chat(request: ChatRequest):
+    print(f"--- app/main.py: /chat CALLED by user: {request.user_id} with query: '{request.query[:50]}...' ---")
+    user_id = request.user_id
+    user_query = request.query
+
+    if not user_query:
+        print("--- app/main.py: /chat - Query is empty ---")
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
+
+    current_history = conversation_histories.get(user_id, [])
 
     try:
-        history_for_model = []
-        for turn in conversation_history:
-            role = 'user' if turn.get('role') == 'user' else 'model'
-            history_for_model.append({'role': role, 'parts': [{'text': turn.get('content', '')}]})
+        print(f"--- Calling Gemini Service for user '{user_id}' ---")
+        final_reply, final_ui_data = await generate_gemini_response(user_query, current_history)
+        print(f"--- Gemini Service returned. UI Component: {final_ui_data.get('component_type')} ---")
 
-        chat = model.start_chat(history=history_for_model)
-        
-        print(">>> Sending message to Gemini...")
-        response = await chat.send_message_async(user_query)
-        
-        if not response.candidates:
-             return "I'm sorry, I couldn't generate a response for that. Please try again.", final_ui_data
+        # Update conversation history
+        current_history.append({"role": "user", "content": user_query})
+        if final_reply and final_reply.strip():
+            current_history.append({"role": "assistant", "content": final_reply})
+        conversation_histories[user_id] = current_history[-HISTORY_LIMIT:]
+        print(f">>> History for {user_id} updated. New length: {len(conversation_histories[user_id])}")
 
-        response_part = response.candidates[0].content.parts[0]
-
-        if hasattr(response_part, 'function_call') and response_part.function_call.name:
-            tool_name = response_part.function_call.name
-            tool_args = response_part.function_call.args
-            
-            print(f">>> Gemini wants to call TOOL: '{tool_name}'")
-            
-            component_type = TOOL_NAME_TO_COMPONENT_TYPE.get(tool_name, "generic_text")
-            data_dict = {key: val for key, val in tool_args.items()}
-
-            final_ui_data = {
-                "component_type": component_type,
-                "data": data_dict
-            }
-            
-            component_name_readable = component_type.replace('_', ' ').title()
-            final_reply = f"Of course, here is the {component_name_readable} you asked for."
-            
-            # Check if there is also a text part in the response
-            if response.text and response.text.strip():
-                final_reply = response.text
-
-        elif response.text:
-            print(">>> Gemini provided a direct text reply.")
-            final_reply = response.text
-            final_ui_data = {"component_type": "generic_text", "data": {"message": "Conversational reply."}}
-        
-        print(f"--- Gemini response generated successfully. Reply: '{final_reply[:100]}...'")
-        return final_reply, final_ui_data
+        # Return the final response
+        return ChatResponse(reply=final_reply, ui_data=final_ui_data)
 
     except Exception as e:
-        print(f"!!! An error occurred in generate_gemini_response: {e}")
+        error_type = type(e).__name__
+        print(f"!!! UNHANDLED EXCEPTION in /chat endpoint (main.py) !!!")
+        print(f"Exception Type: {error_type}")
+        print(f"Exception details: {str(e)}")
         traceback.print_exc()
-        error_reply = f"An unexpected error occurred while contacting the AI service: {type(e).__name__}."
-        error_ui_data = {"component_type": "generic_text", "data": {"error": str(e)}}
-        return error_reply, error_ui_data
+        # Return a structured error response
+        error_reply = f"Sorry, a critical server error occurred ({error_type}). Please try a different sports/gaming query."
+        error_ui_data = {"component_type": "generic_text", "data": {"error": f"Server error: {error_type}"}}
+        return ChatResponse(reply=error_reply, ui_data=error_ui_data)
 
-print("--- gemini_service.py: BOTTOM OF FILE ---")
+print("--- app/main.py: BOTTOM OF FILE, APP DEFINED ---")

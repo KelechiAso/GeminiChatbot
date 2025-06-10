@@ -1,185 +1,170 @@
-# /app/main.py
-print("--- app/main.py: TOP OF FILE ---")
-from fastapi.responses import StreamingResponse
-from typing import List, Dict, Any, Optional, AsyncGenerator # Add AsyncGenerator
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+# /app/api/gemini_service.py
+
 import os
 import json
 import traceback
-import pprint
+import google.generativeai as genai
+from typing import Dict, List, Any, Tuple
 
-print("--- app/main.py: Standard imports DONE ---")
+# --- MODIFICATION: Import the necessary Schema and Type objects ---
+from google.generativeai.protos import Schema, Type
 
+# --- Setup ---
+print("--- gemini_service.py: TOP OF FILE ---")
 try:
-    print("--- app/main.py: Attempting to import from api.openai_service ---")
-    from .api.gemini_service import (
-        extract_sports_info,
-        fetch_raw_text_data,
-        get_structured_data_and_reply_via_tools
-    )
-    print("--- app/main.py: SUCCESSFULLY IMPORTED from api.openai_service ---")
-except ImportError as e:
-    print(f"--- app/main.py: !!! FAILED to import from api.openai_service due to ImportError: {e} !!! ---")
-    traceback.print_exc() 
-    raise e # CRITICAL: Re-raise to make app crash if service can't load
-except Exception as e: 
-    print(f"--- app/main.py: !!! FAILED to import from api.openai_service due to OTHER error: {e} !!! ---")
-    traceback.print_exc()
-    raise e # CRITICAL: Re-raise
-
-
-app = FastAPI(
-    title="Sports Chatbot Microservice (SPAI) - v2.1",
-    description="Provides sports and gaming info using OpenAI tools and domain enforcement."
-)
-print("--- app/main.py: FastAPI INSTANCE CREATED ---")
-
-# --- CORS ---
-origins = ["*",]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-print("--- app/main.py: CORS Middleware ADDED ---")
-
-# --- API Models ---
-class ChatRequest(BaseModel):
-    user_id: str = "default_user"
-    query: str
-
-class ChatResponse(BaseModel):
-    reply: str
-    ui_data: Dict[str, Any]
-print("--- app/main.py: Pydantic Models DEFINED ---")
-
-# --- In-Memory History Store ---
-conversation_histories: Dict[str, List[Dict[str, str]]] = {}
-HISTORY_LIMIT = 10
-print("--- app/main.py: Conversation History Store INITIALIZED ---")
-
-# --- Serve Static HTML File for the Root Path ---
-@app.get("/", response_class=FileResponse)
-async def read_index():
-    print("--- app/main.py: / endpoint CALLED ---")
-    html_file_path = "app/static/htmlsim.html"
-    try:
-        if not os.path.exists(html_file_path):
-            print(f"--- app/main.py: ERROR - {html_file_path} NOT FOUND for / endpoint ---")
-            raise HTTPException(status_code=404, detail="Index HTML not found. Ensure app/static/htmlsim.html exists.")
-        print(f"--- app/main.py: Attempting to serve {html_file_path} for / endpoint ---")
-        return FileResponse(html_file_path)
-    except Exception as e:
-        print(f"--- app/main.py: ERROR in / endpoint: {e} ---")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Internal server error serving index: {str(e)}")
-
-@app.get("/health")
-async def health_check():
-    print("--- app/main.py: /health endpoint CALLED ---")
-    return {"status": "ok_v2.1"}
-
-# --- Main Chat Endpoint ---
-@app.post("/chat", response_model=ChatResponse)
-async def handle_chat(request: ChatRequest):
-    print(f"--- app/main.py: /chat endpoint CALLED by user: {request.user_id} with query: '{request.query[:30]}...' ---")
-    user_id = request.user_id
-    user_query = request.query
-    if not user_query:
-        print("--- app/main.py: /chat - Query is empty ---")
-        raise HTTPException(status_code=400, detail="Query cannot be empty")
-
-    # Initialize defaults for this request
-    final_reply = "Sorry, I'm having trouble processing sports/gaming requests right now."
-    final_ui_data = {"component_type": "generic_text", "data": {"message": "Default error UI."}}
-    current_history = conversation_histories.get(user_id, [])
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise ValueError("CRITICAL: GOOGLE_API_KEY environment variable not set.")
     
+    genai.configure(api_key=api_key)
+    print("--- gemini_service.py: Google AI SDK Configured ---")
+
+except Exception as e:
+    print(f"--- gemini_service.py: !!! FAILED to configure Google AI SDK: {e} !!! ---")
+    traceback.print_exc()
+    raise e
+
+# --- System Prompt (Unchanged) ---
+SYSTEM_PROMPT = """
+You are GameNerd, a specialized AI assistant for sports and gaming information ONLY.
+Your personality is helpful, concise, and friendly.
+
+**Your Core Rules:**
+1.  **Domain Focus:** You MUST ONLY answer questions related to sports, e-gamiing, betting statistics, schedules, player info, and team stats.
+2.  **Decline Off-Topic Requests:** If the user asks about anything else (e.g., math, history, personal advice, politics), you MUST politely decline.
+3.  **Language Matching:** Respond in the user's language. If a user asks a question in Nigerian Pidgin, respond in Pidgin. If they ask an off-topic question in that language, decline in that language. Example: "Oga, I be sports AI, I no sabi about dis matter. How I fit help you with sports or game scores?"
+4.  **Tool-First Approach:** For any sports data request, your PRIMARY goal is to use the provided tools to generate a structured UI component. Your text reply should be a brief, introductory sentence for the UI component.
+5.  **Conversational Replies:** For greetings, simple questions ("who are you?"), or acknowledgments, provide a direct, conversational text reply without using a tool.
+6.  **No Links:** Your textual reply MUST NOT contain any markdown links (e.g., `[text](URL)`) or full URLs. Mention sources by name only if necessary.
+"""
+
+# --- MODIFICATION: All Schemas are now defined using genai.protos.Schema and Type ---
+
+SCHEMA_DATA_H2H = Schema(
+    type=Type.OBJECT,
+    properties={
+        'h2h_summary': Schema(type=Type.OBJECT, properties={
+            'team1': Schema(type=Type.OBJECT, properties={
+                'name': Schema(type=Type.STRING),
+                'wins': Schema(type=Type.INTEGER), 'draws': Schema(type=Type.INTEGER), 'losses': Schema(type=Type.INTEGER),
+                'goals_for': Schema(type=Type.INTEGER), 'goals_against': Schema(type=Type.INTEGER)
+            }),
+            'team2': Schema(type=Type.OBJECT, properties={
+                'name': Schema(type=Type.STRING),
+                'wins': Schema(type=Type.INTEGER), 'draws': Schema(type=Type.INTEGER), 'losses': Schema(type=Type.INTEGER),
+                'goals_for': Schema(type=Type.INTEGER), 'goals_against': Schema(type=Type.INTEGER)
+            }),
+            'total_matches': Schema(type=Type.INTEGER)
+        }),
+        'recent_meetings': Schema(type=Type.ARRAY, items=Schema(type=Type.OBJECT, properties={
+            'date': Schema(type=Type.STRING), 'score': Schema(type=Type.STRING), 'competition': Schema(type=Type.STRING)
+        }))
+    },
+    required=['h2h_summary']
+)
+
+SCHEMA_DATA_MATCH_SCHEDULE_TABLE = Schema(
+    type=Type.OBJECT,
+    properties={
+        'title': Schema(type=Type.STRING),
+        'headers': Schema(type=Type.ARRAY, items=Schema(type=Type.STRING)),
+        'rows': Schema(type=Type.ARRAY, items=Schema(type=Type.ARRAY, items=Schema(type=Type.STRING))),
+        'sort_info': Schema(type=Type.STRING)
+    },
+    required=['headers', 'rows']
+)
+
+# NOTE: For simplicity, I have only included the two schemas that were causing the most common issues.
+# If you have more schemas, you will need to convert them in the same way.
+# The following is a placeholder for all your other schemas.
+# Please ensure ALL of your schemas are converted to this new format.
+
+# --- Tool Name Mapping (Unchanged) ---
+TOOL_NAME_TO_COMPONENT_TYPE = {
+    "present_h2h_comparison": "h2h_comparison_table",
+    "show_match_schedule": "match_schedule_table",
+    # ... Add all other mappings from your original file ...
+}
+
+
+# --- Gemini Model and Tool Configuration ---
+tools_for_gemini = [
+    genai.protos.Tool(
+        function_declarations=[
+            genai.protos.FunctionDeclaration(name='present_h2h_comparison', description="Presents a head-to-head comparison between two teams.", parameters=SCHEMA_DATA_H2H),
+            genai.protos.FunctionDeclaration(name='show_match_schedule', description="Shows a schedule of upcoming matches.", parameters=SCHEMA_DATA_MATCH_SCHEDULE_TABLE),
+            # ... Add all other FunctionDeclarations here corresponding to your schemas ...
+        ]
+    )
+]
+
+model = genai.GenerativeModel(
+    model_name='gemini-1.5-flash-latest',
+    system_instruction=SYSTEM_PROMPT,
+    tools=tools_for_gemini
+)
+print("--- gemini_service.py: Gemini Model INITIALIZED (gemini-1.5-flash-latest) ---")
+
+
+# --- Main Service Function (Unchanged) ---
+async def generate_gemini_response(
+    user_query: str,
+    conversation_history: List[Dict[str, str]]
+) -> Tuple[str, Dict[str, Any]]:
+    print(f"--- gemini_service.py: Generating response for query: '{user_query[:50]}...' ---")
+    
+    final_reply = "Sorry, I couldn't process that. Please try again."
+    final_ui_data = {"component_type": "generic_text", "data": {}}
+
     try:
-        # --- Step 0: Extract Intent/Entities ---
-        print(f"--- Step 0 (main.py): Extracting info for query: '{user_query[:50]}...' ---")
-        parsed_info = await extract_sports_info(user_query, current_history)
+        history_for_model = []
+        for turn in conversation_history:
+            role = 'user' if turn.get('role') == 'user' else 'model'
+            history_for_model.append({'role': role, 'parts': [{'text': turn.get('content', '')}]})
+
+        chat = model.start_chat(history=history_for_model)
         
-        if not isinstance(parsed_info, dict) or parsed_info.get("input_type") == "error":
-             error_msg = parsed_info.get('message', 'Query parsing failed at Step 0.')
-             print(f"!!! Step 0 (main.py): Extraction failed or returned error: {error_msg}")
-             return ChatResponse(reply=f"Error understanding your request: {error_msg}", ui_data=final_ui_data)
+        print(">>> Sending message to Gemini...")
+        response = await chat.send_message_async(user_query)
         
-        print(f"--- Step 0 (main.py) Result (parsed_info):")
-        pprint.pprint(parsed_info)
+        if not response.candidates:
+             return "I'm sorry, I couldn't generate a response for that. Please try again.", final_ui_data
 
-        input_type_from_step_0 = parsed_info.get("input_type")
-        direct_reply_from_step_0 = parsed_info.get("conversation")
-        short_circuit_types = ["acknowledgment", "simple_greeting", "invalid_request", "out_of_scope_request"]
+        response_part = response.candidates[0].content.parts[0]
 
-        if input_type_from_step_0 in short_circuit_types and \
-           direct_reply_from_step_0 and \
-           isinstance(direct_reply_from_step_0, str) and \
-           direct_reply_from_step_0.strip():
-            print(f"--- Step 0 (main.py) identified as '{input_type_from_step_0}'. Short-circuiting with direct reply. ---")
-            final_reply = direct_reply_from_step_0
-            if input_type_from_step_0 == "out_of_scope_request":
-                final_ui_data = {"component_type": "generic_text", "data": {"message": "This query is outside of my sports/gaming expertise."}}
-            else: # For other short-circuits, keep ui_data generic
-                final_ui_data = {"component_type": "generic_text", "data": {}}
-        else:
-            print(f"--- Step 1 (main.py): Attempting to fetch raw text data for input_type: {input_type_from_step_0} ---")
-            raw_text_data = await fetch_raw_text_data(user_query, parsed_info, current_history)
-            print(f"--- Step 1 (main.py) Result (raw_text_data snippet): {str(raw_text_data)[:150]}... ---")
+        if response_part.function_call.name:
+            tool_name = response_part.function_call.name
+            tool_args = response_part.function_call.args
+            
+            print(f">>> Gemini wants to call TOOL: '{tool_name}'")
+            
+            component_type = TOOL_NAME_TO_COMPONENT_TYPE.get(tool_name, "generic_text")
+            data_dict = {key: val for key, val in tool_args.items()}
 
-            print(f"--- Step 2 (main.py): Generating reply and UI data via Tool Calling ---")
-            final_data_dict = await get_structured_data_and_reply_via_tools(
-                parsed_info,
-                current_history,
-                raw_text_data
-            )
+            final_ui_data = {
+                "component_type": component_type,
+                "data": data_dict
+            }
+            
+            component_name_readable = component_type.replace('_', ' ').title()
+            final_reply = f"Of course, here is the {component_name_readable} you asked for."
+            
+            if response.text and response.text.strip():
+                final_reply = response.text
 
-            if not isinstance(final_data_dict, dict) or "reply" not in final_data_dict or "ui_data" not in final_data_dict:
-                 print(f"!!! Step 3 (main.py) ERROR: Tool calling step (Step 2) returned invalid dict structure. Response: {str(final_data_dict)[:200]}")
-                 # final_reply uses its default error message
-            else:
-                 final_reply = final_data_dict.get("reply", "Processed your sports/gaming request.")
-                 final_ui_data = final_data_dict.get("ui_data", {"component_type": "generic_text", "data": {"message": "No specific UI data was generated."}})
-                 print(f">>> Step 3 (main.py): Successfully received reply/ui_data. UI Component: {final_ui_data.get('component_type')}")
+        elif response.text:
+            print(">>> Gemini provided a direct text reply.")
+            final_reply = response.text
+            final_ui_data = {"component_type": "generic_text", "data": {"message": "Conversational reply."}}
         
-        if not final_reply or not final_reply.strip(): # Ensure there's always some reply
-            if input_type_from_step_0 == "acknowledgment": final_reply = "Noted."
-            else: final_reply = "Your sports/gaming query has been processed."
+        print(f"--- Gemini response generated successfully. Reply: '{final_reply[:100]}...'")
+        return final_reply, final_ui_data
 
-        # --- Step 4: Update History ---
-        print(f"--- Step 4 (main.py): Updating History ---")
-        current_history.append({"role": "user", "content": user_query})
-        if final_reply and final_reply.strip(): 
-             current_history.append({"role": "assistant", "content": final_reply})
-             print(f">>> Assistant reply added to history: '{final_reply[:100]}...'")
-        else:
-            print(f">>> Skipping assistant reply in history update due to empty content.")
-        
-        conversation_histories[user_id] = current_history[-HISTORY_LIMIT:]
-        print(f">>> History for {user_id} updated. Length: {len(conversation_histories[user_id])}")
-
-        final_response_object = ChatResponse(reply=final_reply, ui_data=final_ui_data)
-        print(f"--- Request processing complete (main.py). Returning reply: '{final_reply[:50]}...' ---")
-        return final_response_object
-
-    except HTTPException as http_exc:
-        print(f"!!! HTTP EXCEPTION CAUGHT directly in /chat: {http_exc.detail}")
-        traceback.print_exc() # Log traceback for HTTPExceptions too
-        raise http_exc 
     except Exception as e:
-        error_type = type(e).__name__
-        print(f"!!! UNHANDLED EXCEPTION in /chat endpoint (main.py) !!!")
-        print(f"Exception Type: {error_type}")
-        print(f"Exception details: {str(e)}")
+        print(f"!!! An error occurred in generate_gemini_response: {e}")
         traceback.print_exc()
-        # Ensure a fallback reply in case of unexpected errors
-        error_reply = f"Sorry, a critical internal server error occurred ({error_type}). Please try a different sports/gaming query."
-        error_ui_data = {"component_type": "generic_text", "data": {"error": f"Server error: {error_type}"}}
-        return ChatResponse(reply=error_reply, ui_data=error_ui_data)
+        error_reply = f"An unexpected error occurred while contacting the AI service: {type(e).__name__}."
+        error_ui_data = {"component_type": "generic_text", "data": {"error": str(e)}}
+        return error_reply, error_ui_data
 
-print("--- app/main.py: BOTTOM OF FILE, APP DEFINED ---")
+print("--- gemini_service.py: BOTTOM OF FILE ---")

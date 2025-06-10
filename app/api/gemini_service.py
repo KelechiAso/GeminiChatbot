@@ -6,8 +6,10 @@ import traceback
 import google.generativeai as genai
 from typing import Dict, List, Any, Tuple
 
-# --- MODIFICATION: Import both Schema and Type ---
-from google.generativeai.protos import Schema, Type
+# --- NEW: Import the search library ---
+from duckduckgo_search import DDGS
+
+from google.generativeai.protos import Schema, Type, Tool, FunctionDeclaration
 
 # --- Setup ---
 print("--- gemini_service.py: TOP OF FILE ---")
@@ -24,35 +26,28 @@ except Exception as e:
     traceback.print_exc()
     raise e
 
-# --- System Prompt (Unchanged) ---
+# --- System Prompt (Updated to encourage searching) ---
 SYSTEM_PROMPT = """
 You are GameNerd, a specialized AI assistant for sports and gaming information ONLY.
 Your personality is helpful, concise, and friendly.
-Your goal is to use the provided tools to generate structured UI components for sports data requests.
+Your goal is to use the provided tools to generate structured UI components or answer questions with live data.
+
+**Your Core Rules:**
+1.  **Use the Search Tool:** For any questions that require real-time information (e.g., "what games are on today?", "latest scores", "recent news", "live match details"), you MUST use the `Google Search` tool.
+2.  **Use UI Tools:** For requests that ask for structured data (e.g., "head-to-head stats for Team A vs Team B", "show me the league table"), use the appropriate UI tool (e.g., `present_h2h_comparison`, `display_standings_table`).
+3.  **Decline Off-Topic Requests:** If the user asks about anything not related to sports or gaming, you MUST politely decline.
 """
 
-# --- MODIFICATION: Schemas are now correctly defined using Schema(type_=...) ---
-# The keyword is `type_` with a trailing underscore, not `type`.
-
+# --- Schema Definitions (Unchanged) ---
 SCHEMA_DATA_H2H = Schema(
     type_=Type.OBJECT,
     properties={
         'h2h_summary': Schema(type_=Type.OBJECT, properties={
-            'team1': Schema(type_=Type.OBJECT, properties={
-                'name': Schema(type_=Type.STRING),
-                'wins': Schema(type_=Type.INTEGER), 'draws': Schema(type_=Type.INTEGER), 'losses': Schema(type_=Type.INTEGER),
-                'goals_for': Schema(type_=Type.INTEGER), 'goals_against': Schema(type_=Type.INTEGER)
-            }),
-            'team2': Schema(type_=Type.OBJECT, properties={
-                'name': Schema(type_=Type.STRING),
-                'wins': Schema(type_=Type.INTEGER), 'draws': Schema(type_=Type.INTEGER), 'losses': Schema(type_=Type.INTEGER),
-                'goals_for': Schema(type_=Type.INTEGER), 'goals_against': Schema(type_=Type.INTEGER)
-            }),
+            'team1': Schema(type_=Type.OBJECT, properties={'name': Schema(type_=Type.STRING),'wins': Schema(type_=Type.INTEGER), 'draws': Schema(type_=Type.INTEGER), 'losses': Schema(type_=Type.INTEGER),'goals_for': Schema(type_=Type.INTEGER), 'goals_against': Schema(type_=Type.INTEGER)}),
+            'team2': Schema(type_=Type.OBJECT, properties={'name': Schema(type_=Type.STRING),'wins': Schema(type_=Type.INTEGER), 'draws': Schema(type_=Type.INTEGER), 'losses': Schema(type_=Type.INTEGER),'goals_for': Schema(type_=Type.INTEGER), 'goals_against': Schema(type_=Type.INTEGER)}),
             'total_matches': Schema(type_=Type.INTEGER)
         }),
-        'recent_meetings': Schema(type_=Type.ARRAY, items=Schema(type_=Type.OBJECT, properties={
-            'date': Schema(type_=Type.STRING), 'score': Schema(type_=Type.STRING), 'competition': Schema(type_=Type.STRING)
-        }))
+        'recent_meetings': Schema(type_=Type.ARRAY, items=Schema(type_=Type.OBJECT, properties={'date': Schema(type_=Type.STRING), 'score': Schema(type_=Type.STRING), 'competition': Schema(type_=Type.STRING)}))
     },
     required=['h2h_summary']
 )
@@ -68,18 +63,28 @@ SCHEMA_DATA_MATCH_SCHEDULE_TABLE = Schema(
     required=['headers', 'rows']
 )
 
+# --- NEW: Schema for the Search Tool ---
+SCHEMA_Google Search = Schema(
+    type_=Type.OBJECT,
+    properties={'query': Schema(type_=Type.STRING, description="The precise search query to find real-time information.")},
+    required=['query']
+)
+
 # --- Tool Name Mapping (Unchanged) ---
 TOOL_NAME_TO_COMPONENT_TYPE = {
     "present_h2h_comparison": "h2h_comparison_table",
     "show_match_schedule": "match_schedule_table",
 }
 
-# --- Gemini Model and Tool Configuration (Unchanged) ---
+# --- Tool Configuration (Updated with the new search tool) ---
 tools_for_gemini = [
-    genai.protos.Tool(
+    Tool(
         function_declarations=[
-            genai.protos.FunctionDeclaration(name='present_h2h_comparison', description="Presents a head-to-head comparison between two teams.", parameters=SCHEMA_DATA_H2H),
-            genai.protos.FunctionDeclaration(name='show_match_schedule', description="Shows a schedule of upcoming matches.", parameters=SCHEMA_DATA_MATCH_SCHEDULE_TABLE),
+            # NEW SEARCH TOOL
+            FunctionDeclaration(name='Google Search', description="Searches the web for real-time sports information like schedules, live scores, and news.", parameters=SCHEMA_Google Search),
+            # EXISTING UI TOOLS
+            FunctionDeclaration(name='present_h2h_comparison', description="Presents a head-to-head comparison between two teams.", parameters=SCHEMA_DATA_H2H),
+            FunctionDeclaration(name='show_match_schedule', description="Shows a schedule of upcoming matches.", parameters=SCHEMA_DATA_MATCH_SCHEDULE_TABLE),
         ]
     )
 ]
@@ -89,10 +94,10 @@ model = genai.GenerativeModel(
     system_instruction=SYSTEM_PROMPT,
     tools=tools_for_gemini
 )
-print("--- gemini_service.py: Gemini Model INITIALIZED (gemini-1.5-flash-latest) ---")
+print("--- gemini_service.py: Gemini Model INITIALIZED with Search Tool ---")
 
 
-# --- Main Service Function (Unchanged) ---
+# --- Main Service Function (UPDATED with search logic) ---
 async def generate_gemini_response(
     user_query: str,
     conversation_history: List[Dict[str, str]]
@@ -110,7 +115,7 @@ async def generate_gemini_response(
 
         chat = model.start_chat(history=history_for_model)
         
-        print(">>> Sending message to Gemini...")
+        print(">>> Sending message to Gemini (Turn 1)...")
         response = await chat.send_message_async(user_query)
         
         if not response.candidates:
@@ -123,20 +128,43 @@ async def generate_gemini_response(
             tool_args = response_part.function_call.args
             
             print(f">>> Gemini wants to call TOOL: '{tool_name}'")
-            
-            component_type = TOOL_NAME_TO_COMPONENT_TYPE.get(tool_name, "generic_text")
-            data_dict = {key: val for key, val in tool_args.items()}
 
-            final_ui_data = {
-                "component_type": component_type,
-                "data": data_dict
-            }
-            
-            component_name_readable = component_type.replace('_', ' ').title()
-            final_reply = f"Of course, here is the {component_name_readable} you asked for."
-            
-            if response.text and response.text.strip():
+            # --- NEW: Logic to handle the Google Search tool ---
+            if tool_name == "Google Search":
+                search_query = tool_args['query']
+                print(f"--- Performing web search for: '{search_query}' ---")
+                
+                # Use the library to perform the search
+                search_results = []
+                with DDGS() as ddgs:
+                    for r in ddgs.text(search_query, max_results=5):
+                        search_results.append(r)
+
+                print(f"--- Found {len(search_results)} results. Sending back to Gemini. ---")
+
+                # Send the results back to the model
+                tool_response = Tool(
+                    function_response={
+                        "name": "Google Search",
+                        "response": {"results": json.dumps(search_results)},
+                    }
+                )
+                print(">>> Sending search results to Gemini (Turn 2)...")
+                response = await chat.send_message_async(tool_response)
+                # The final reply will be in this new response
                 final_reply = response.text
+                # Since the search tool was used, the UI is generic text.
+                final_ui_data = {"component_type": "generic_text", "data": {"message": "Used web search to find the answer."}}
+
+            # --- Logic for existing UI tools (unchanged) ---
+            else:
+                component_type = TOOL_NAME_TO_COMPONENT_TYPE.get(tool_name, "generic_text")
+                data_dict = {key: val for key, val in tool_args.items()}
+                final_ui_data = {"component_type": component_type, "data": data_dict}
+                component_name_readable = component_type.replace('_', ' ').title()
+                final_reply = f"Of course, here is the {component_name_readable} you asked for."
+                if response.text and response.text.strip():
+                    final_reply = response.text
 
         elif response.text:
             print(">>> Gemini provided a direct text reply.")

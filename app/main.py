@@ -16,7 +16,7 @@ print("--- app/main.py: Standard imports DONE ---")
 
 try:
     print("--- app/main.py: Attempting to import from api.openai_service ---")
-    from .api.openai_service import (
+    from .api.gemini_service import (
         extract_sports_info,
         fetch_raw_text_data,
         get_structured_data_and_reply_via_tools
